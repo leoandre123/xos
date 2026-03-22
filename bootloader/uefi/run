@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")"
+
+make
+
+mkdir -p esp/EFI/BOOT
+cp build/BOOTX64.EFI esp/EFI/BOOT/BOOTX64.EFI
+
+CODE_FD=$(find /usr/share -name 'OVMF_CODE*.fd' | head -n 1)
+VARS_FD=$(find /usr/share -name 'OVMF_VARS*.fd' | head -n 1)
+
+if [ -z "$CODE_FD" ] || [ -z "$VARS_FD" ]; then
+    echo "Could not find OVMF firmware files."
+    echo "Try: find /usr/share -name 'OVMF_CODE*.fd'"
+    echo "Try: find /usr/share -name 'OVMF_VARS*.fd'"
+    exit 1
+fi
+
+cp "$VARS_FD" build/OVMF_VARS.fd
+
+qemu-system-x86_64 \
+    -m 256M \
+    -drive if=pflash,format=raw,readonly=on,file="$CODE_FD" \
+    -drive if=pflash,format=raw,file=build/OVMF_VARS.fd \
+    -drive format=raw,file=fat:rw:esp
