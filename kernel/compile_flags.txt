@@ -1,0 +1,11 @@
+-xc
+-std=gnu11
+-ffreestanding
+-fno-stack-protector
+-fno-pic
+-m64
+-mcmodel=kernel
+-Wall
+-Wextra
+-I.
+-I../shared
