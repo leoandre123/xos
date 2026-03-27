@@ -3,9 +3,9 @@
 #include "serial.h"
 
 static volatile uint32_t *fb;
-static uint32_t fb_width;
-static uint32_t fb_height;
-static uint32_t fb_pitch_pixels;
+static uint fb_width;
+static uint fb_height;
+static uint fb_pitch_pixels;
 
 static uint32_t cursor_x;
 static uint32_t cursor_y;
@@ -36,11 +36,12 @@ static void draw_char_at(uint32_t px, uint32_t py, char c, int factor) {
   }
 }
 
-void console_init(BootInfo *boot_info) {
-  fb = (volatile uint32_t *)(uint64_t)boot_info->framebuffer_base;
-  fb_width = boot_info->framebuffer_width;
-  fb_height = boot_info->framebuffer_height;
-  fb_pitch_pixels = boot_info->framebuffer_pitch / 4;
+void console_init(ulong fb_base, uint width, uint height, uint pitch) {
+  fb = (volatile uint32_t *)fb_base;
+  fb_width = width;
+  fb_height = height;
+  fb_pitch_pixels = pitch / 4;
+
   cursor_x = 0;
   cursor_y = 0;
 }

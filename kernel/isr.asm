@@ -1,51 +1,5 @@
-BITS 64
-
-global isr0
-global isr3
-global isr13
-global isr14
-global isr33
-global isr32
-
-extern isr0_handler
-extern isr3_handler
-extern isr13_handler
-extern isr14_handler
-extern isr33_handler
-extern isr32_handler
-
-section .text
-
-isr0:
-    cli
-    call isr0_handler
-    iretq
-
-isr3:
-    cli
-    call isr3_handler
-    iretq
-
-isr13:
-    cli
-    mov rdi, [rsp]        ; error code
-    call isr13_handler
-    add rsp, 8            ; pop error code before iretq
-    iretq
-
-isr14:
-    cli
-    mov rdi, [rsp]        ; error code
-    call isr14_handler
-    add rsp, 8            ; pop error code before iretq
-    iretq
-
-isr33:
-    cli
-    call isr33_handler
-    iretq
-
-isr32:
+%macro ISR 1
+    push %1
     push r15
     push r14
     push r13
@@ -62,7 +16,8 @@ isr32:
     push rbx
     push rax
 
-    call isr32_handler
+    mov rdi, rsp
+    call interrupt_dispatch
 
     pop rax
     pop rbx
@@ -80,6 +35,74 @@ isr32:
     pop r14
     pop r15
 
+    add rsp, 16
     iretq
+%endmacro
+%macro ISR_ERR 1
+global isr%1
+isr%1:
+    ISR %1
+%endmacro
+%macro ISR_NOERR 1
+global isr%1
+isr%1:
+    push 0
+    ISR %1
+%endmacro
+
+BITS 64
+extern interrupt_dispatch
+
+section .text
+
+ISR_NOERR 0
+ISR_NOERR 1
+ISR_NOERR 2
+ISR_NOERR 3
+ISR_NOERR 4
+ISR_NOERR 5
+ISR_NOERR 6
+ISR_NOERR 7
+ISR_ERR 8
+ISR_NOERR 9
+ISR_ERR 10
+ISR_ERR 11
+ISR_ERR 12
+ISR_ERR 13
+ISR_ERR 14
+ISR_NOERR 15
+ISR_NOERR 16
+ISR_ERR 17
+ISR_NOERR 18
+ISR_NOERR 19
+ISR_NOERR 20
+ISR_ERR 21
+ISR_NOERR 22
+ISR_NOERR 23
+ISR_NOERR 24
+ISR_NOERR 25
+ISR_NOERR 26
+ISR_NOERR 27
+ISR_NOERR 28
+ISR_ERR 29
+ISR_ERR 30
+ISR_NOERR 31
+ISR_NOERR 32
+ISR_NOERR 33
+ISR_NOERR 34
+ISR_NOERR 35
+ISR_NOERR 36
+ISR_NOERR 37
+ISR_NOERR 38
+ISR_NOERR 39
+ISR_NOERR 40
+ISR_NOERR 41
+ISR_NOERR 42
+ISR_NOERR 43
+ISR_NOERR 44
+ISR_NOERR 45
+ISR_NOERR 46
+ISR_NOERR 47
+
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -1,32 +1,71 @@
-#include <stdint.h>
 #include "gdt.h"
+#include "types.h"
 
-struct gdt_ptr
-{
-    uint16_t limit;
-    uint64_t base;
+struct gdt_ptr {
+  uint16_t limit;
+  uint64_t base;
 } __attribute__((packed));
 
-static uint64_t gdt[3];
+typedef struct {
+  uint reserved0;
+  ulong rsp0;
+  ulong rsp1;
+  ulong rsp2;
+  ulong reserved1;
+  ulong ist[7];
+  ulong reserved2;
+  ushort reserved3;
+  ushort iomap_base;
+} __attribute__((packed)) tss_t;
+
+typedef struct {
+  ushort limit_low;
+  ushort base_low;
+  ubyte base_mid;
+  ubyte type;
+  ubyte limit_flags;
+  ubyte base_high;
+  uint base_upper;
+  uint reserved;
+} __attribute__((packed)) tss_descriptor_t;
+
+static uint64_t gdt[7];
 static struct gdt_ptr gdtr;
+static tss_t g_tss;
 
-extern void gdt_load_flush(uint64_t gdtr_addr, uint16_t data_selector);
+extern void gdt_load_flush(ulong gdtr_addr, ushort data_selector);
+extern void tss_load(ushort selector);
 
-void gdt_init(void)
-{
-    // Null descriptor
-    gdt[0] = 0x0000000000000000ULL;
+static void gdt_set_tss(int index, tss_t *tss) {
+  ulong base = (ulong)tss;
+  uint limit = sizeof(tss_t) - 1;
 
-    // Kernel code segment: base=0, limit ignored in long mode
-    // Access = 0x9A, Flags = 0xA
-    gdt[1] = 0x00AF9A000000FFFFULL;
+  tss_descriptor_t *desc = (tss_descriptor_t *)&gdt[index];
+  desc->limit_low = limit & 0xFFFF;
+  desc->base_low = base & 0xFFFF;
+  desc->base_mid = (base >> 16) & 0xFF;
+  desc->type = 0x89; // present, 64-bit TSS available
+  desc->limit_flags = ((limit >> 16) & 0xF);
+  desc->base_high = (base >> 24) & 0xFF;
+  desc->base_upper = (base >> 32) & 0xFFFFFFFF;
+  desc->reserved = 0;
+}
 
-    // Kernel data segment
-    // Access = 0x92, Flags = 0xA
-    gdt[2] = 0x00AF92000000FFFFULL;
+void gdt_set_kernel_stack(ulong rsp0) {
+  g_tss.rsp0 = rsp0;
+}
 
-    gdtr.limit = sizeof(gdt) - 1;
-    gdtr.base = (uint64_t)&gdt[0];
+void gdt_init(void) {
+  gdt[0] = 0x0000000000000000ULL; // null
+  gdt[1] = 0x00AF9A000000FFFFULL; // kernel code
+  gdt[2] = 0x00AF92000000FFFFULL; // kernel data
+  gdt[3] = 0x00AFFA000000FFFFULL; // user code
+  gdt[4] = 0x00AFF2000000FFFFULL; // user data
+  gdt_set_tss(5, &g_tss);
 
-    gdt_load_flush((uint64_t)&gdtr, 0x10);
+  gdtr.limit = sizeof(gdt) - 1;
+  gdtr.base = (uint64_t)&gdt[0];
+
+  gdt_load_flush((uint64_t)&gdtr, 0x10);
+  tss_load(TSS_SEL);
 }

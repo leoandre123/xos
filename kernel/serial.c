@@ -37,3 +37,36 @@ void serial_write(const char *s) {
     serial_write_char(*s++);
   }
 }
+void serial_write_line(const char *s) {
+  while (*s) {
+    serial_write_char(*s++);
+  }
+  serial_write_char('\n');
+}
+
+void serial_write_ulong(ulong value) {
+  char buf[16];
+  int i = 0;
+
+  if (value == 0) {
+    serial_write_char('0');
+    return;
+  }
+
+  while (value > 0) {
+    buf[i++] = '0' + (value % 10);
+    value /= 10;
+  }
+
+  while (i--) {
+    serial_write_char(buf[i]);
+  }
+}
+void serial_write_hex(ulong value) {
+  static const char *hex = "0123456789ABCDEF";
+  serial_write("0x");
+  for (int i = 15; i >= 0; i--) {
+    uint8_t nibble = (value >> (i * 4)) & 0xF;
+    serial_write_char(hex[nibble]);
+  }
+}

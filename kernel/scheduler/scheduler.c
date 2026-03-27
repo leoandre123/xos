@@ -1,92 +1,168 @@
-// #include "scheduler.h"
-// #include "task.h"
-//
-// extern void context_switch(cpu_context_t *old_ctx, cpu_context_t *new_ctx);
-//
-// static task_t *g_current = 0;
-// static task_t *g_task_list = 0;
-// static int g_next_pid = 1;
-//
-// typedef void (*task_entry_t)(void);
-//
-//__attribute__((noreturn)) void task_exit(void) {
-//   g_current->state = TASK_DEAD;
-//
-//   // schedule();
-//
-//   // panic("task_exit returned");
-// }
-//
-//__attribute__((noreturn)) void task_bootstrap(task_entry_t entry) {
-//   entry();
-//
-//   // If task function returns, kill task
-//   task_exit();
-//
-//   for (;;) {
-//     __asm__ volatile("cli; hlt");
-//   }
-// }
-//
-// static task_t *scheduler_pick_next(void) {
-//   if (!g_current) {
-//     return g_task_list;
-//   }
-//
-//   task_t *t = g_current->next;
-//
-//   while (t != g_current) {
-//     if (t->state == TASK_READY) {
-//       return t;
-//     }
-//     t = t->next;
-//   }
-//
-//   if (g_current->state == TASK_READY || g_current->state == TASK_RUNNING) {
-//     return g_current;
-//   }
-//
-//   return 0;
-// }
-//
-// void scheduler_init() {}
-// void scheduler_add(task_t *task) {
-//   if (!g_task_list) {
-//     g_task_list = task;
-//     task->next = task;
-//     return;
-//   }
-//
-//   task->next = g_task_list->next;
-//   g_task_list->next = task;
-// }
-// void scheduler_run() {
-//   task_t *next = scheduler_pick_next();
-//   if (!next) {
-//     return;
-//   }
-//
-//   if (!g_current) {
-//     g_current = next;
-//     g_current->state = TASK_RUNNING;
-//
-//     cpu_context_t dummy = {0};
-//     context_switch(&dummy, &g_current->context);
-//     return;
-//   }
-//
-//   if (next == g_current) {
-//     return;
-//   }
-//
-//   task_t *prev = g_current;
-//
-//   if (prev->state == TASK_RUNNING) {
-//     prev->state = TASK_READY;
-//   }
-//
-//   g_current = next;
-//   g_current->state = TASK_RUNNING;
-//
-//   context_switch(&prev->context, &g_current->context);
-// }
+#include "scheduler.h"
+#include "gdt.h"
+#include "memory/heap.h"
+#include "memory/memutils.h"
+#include "memory/pmm.h"
+#include "memory/vmm.h"
+#include "panic.h"
+#include "serial.h"
+#include "task.h"
+#include "types.h"
+
+extern void context_switch(ulong *old_rsp, ulong new_rsp);
+
+static task *g_current = 0;
+static task *g_task_list = 0;
+static task *g_idle = 0;
+static int g_next_pid = 1;
+
+__attribute__((noreturn)) void task_exit(void) {
+  g_current->state = TASK_DEAD;
+
+  schedule();
+  panic("task_exit returned");
+}
+
+__attribute__((noreturn)) void task_bootstrap() {
+  g_current->entry(g_current->args);
+  // If task function returns, kill task
+  task_exit();
+
+  for (;;) {
+    __asm__ volatile("cli; hlt");
+  }
+}
+
+__attribute__((noreturn)) static void user_task_bootstrap() {
+  gdt_set_kernel_stack((ulong)g_current->stack_base + g_current->stack_size);
+  jump_to_userspace((ulong)g_current->entry, (ulong)g_current->user_rsp);
+}
+
+static task *scheduler_pick_next(void) {
+  if (!g_current) {
+    return g_task_list;
+  }
+
+  task *t = g_current->next;
+
+  while (t != g_current) {
+    if (t->state == TASK_READY) {
+      return t;
+    }
+    t = t->next;
+  }
+
+  if (g_current->state == TASK_READY || g_current->state == TASK_RUNNING) {
+    return g_current;
+  }
+
+  return g_idle;
+}
+static void idle() {
+  for (;;)
+    asm volatile("hlt");
+}
+static inline task *task_create(void (*entry)(void *), void *args, const char *name, address_space *space) {
+  task *t = kmalloc(sizeof(task));
+  if (!t)
+    return 0;
+  memset8(t, 0, sizeof(task));
+
+  void *stack = kmalloc(4096);
+  if (!stack) {
+    kfree(t);
+    return 0;
+  }
+  memset8(stack, 0, 4096);
+
+  t->pid = g_next_pid++;
+  t->stack_base = stack;
+  t->stack_size = 4096;
+  t->next = 0;
+  t->state = TASK_READY;
+  t->name = name;
+  t->entry = entry;
+  t->args = args;
+  t->address_space = space;
+
+  ulong *sp = stack + 4096;
+  sp = (void *)((ulong)sp & ~0xFULL);
+
+  *--sp = (ulong)task_bootstrap;
+  *--sp = 0; // rbx
+  *--sp = 0; // rbp
+  *--sp = 0; // r12
+  *--sp = 0; // r13
+  *--sp = 0; // r14
+  *--sp = 0; // r15
+
+  t->rsp = sp;
+
+  return t;
+}
+
+void schedule() {
+  task *next = scheduler_pick_next();
+  task *prev = g_current;
+  if (!next || next == prev)
+    return;
+
+  if (prev && prev->state == TASK_RUNNING)
+    prev->state = TASK_READY;
+
+  g_current = next;
+  g_current->state = TASK_RUNNING;
+
+  if (next->address_space) {
+    vmm_switch_address_space(next->address_space);
+    gdt_set_kernel_stack((ulong)next->stack_base + next->stack_size);
+  } else {
+    vmm_switch_address_space(&g_kernel_address_space);
+  }
+
+  if (prev) {
+    context_switch((ulong *)&prev->rsp, (ulong)next->rsp);
+  } else {
+    ulong dummy = 0;
+    serial_write_line("First context_switch");
+    context_switch(&dummy, (ulong)next->rsp);
+  }
+}
+void scheduler_init() {
+  g_idle = task_create_kernel(idle, 0, "idle");
+}
+void scheduler_add(task *task) {
+  if (!g_task_list) {
+    g_task_list = task;
+    task->next = task;
+    return;
+  }
+
+  task->next = g_task_list->next;
+  g_task_list->next = task;
+}
+__attribute__((noreturn)) void scheduler_run() {
+  schedule();
+  panic("schedule_run has returned");
+}
+
+task *task_create_kernel(void (*entry)(void *), void *args, const char *name) {
+  return task_create(entry, args, name, 0);
+}
+
+task *task_create_user(void (*entry)(void *), void *args, const char *name) {
+  address_space *space = vmm_create_address_space();
+  task *t = task_create(entry, args, name, space);
+
+  // allocate and map user stack
+  ulong phys_stack = pmm_alloc_pages(USER_STACK_PAGES);
+  ulong user_stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
+  vmm_map_pages(space, user_stack_base, phys_stack, USER_STACK_PAGES,
+                PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+
+  t->user_rsp = (void *)USER_STACK_TOP; // where rsp points when entering ring 3
+  ulong *sp = t->rsp;
+  sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
+
+  return t;
+}

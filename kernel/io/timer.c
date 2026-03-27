@@ -1,15 +1,18 @@
+#include "idt.h"
 #include "io/io.h"
 #include "io/pic.h"
+#include "scheduler/scheduler.h"
 #include <stdint.h>
-#define PIT_COMMAND 0x43
-#define PIT_CHANNEL0 0x40
+#define PIT_COMMAND        0x43
+#define PIT_CHANNEL0       0x40
 #define PIT_BASE_FREQUENCY 1193182
 
 volatile int g_timer_ticks = 0;
 
-void isr32_handler() {
+void timer_handler() {
   g_timer_ticks++;
   pic_send_eoi(0);
+  schedule();
 }
 
 void timer_init(uint32_t frequency) {
@@ -29,4 +32,6 @@ void timer_init(uint32_t frequency) {
   // Send divisor low byte then high byte
   outb(PIT_CHANNEL0, (uint8_t)(divisor & 0xFF));
   outb(PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xFF));
+
+  register_interrupt_handler(32, timer_handler);
 }

@@ -1,57 +1,59 @@
 #pragma once
-#include <stddef.h>
-#include <stdint.h>
+#include "boot_info.h"
+#include "types.h"
 
 #define KERNEL_PHYS_BASE 0x00200000ULL
-#define KERNEL_VIRT_BASE 0xFFFFFFFF80000000ULL
 
-#define PAGE_SIZE 0x1000ULL
+#define KERNEL_BASE       0xFFFFFFFF80000000ULL
+#define HHDM_BASE         0xFFFF800000000000ULL
+#define FB_BASE           0xFFFF900000000000ULL
+#define KERNEL_HEAP       0xFFFFA00000000000ULL
+#define KERNEL_STACK_BASE 0xFFFFB00000000000ULL
+#define KERNEL_STACK_TOP  0xFFFFC00000000000ULL
+
+#define KERNEL_STACK_PAGE_COUNT 0x400ULL
+
+#define PAGE_SIZE    0x1000ULL
 #define PAGE_SIZE_2M 0x200000ULL
 
-#define PAGE_PRESENT (1ULL << 0)
+#define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
-#define PAGE_USER (1ULL << 2)
-#define PAGE_HUGE (1ULL << 7)
-#define PAGE_NX (1ULL << 63)
+#define PAGE_USER     (1ULL << 2)
+#define PAGE_HUGE     (1ULL << 7)
+#define PAGE_NX       (1ULL << 63)
 
 #define PAGE_ADDR_MASK 0x000FFFFFFFFFF000ULL
 
-typedef uint64_t page_table_t[512];
+typedef struct {
+  ulong entries[512];
+} page_table;
 
 typedef struct {
-  page_table_t *pml4;
-  uint64_t cr3;
-} address_space_t;
+  ulong pml4_phys;
+  page_table *pml4;
+} address_space;
 
 /* Linker symbols */
-extern char __bootstrap_phys_start[];
-extern char __bootstrap_phys_end[];
-
 extern char __kernel_phys_start[];
 extern char __kernel_phys_end[];
 extern char __kernel_virt_start[];
 extern char __kernel_virt_end[];
 
-/* Early bootstrap paging: callable before PMM init */
-void vmm_bootstrap_init(void);
+extern address_space g_kernel_address_space;
 
-/* Full runtime VMM: call after PMM init */
-void vmm_init_runtime(void);
+void vmm_init(BootInfo *boot_info);
 
-address_space_t *vmm_kernel_space(void);
-address_space_t *vmm_current_space(void);
+address_space *vmm_create_address_space(void);
+void vmm_destroy_address_space(address_space *space);
+void vmm_switch_address_space(address_space *space);
 
-void vmm_switch_address_space(address_space_t *space);
+ulong vmm_setup_stack();
 
-int vmm_map_page(address_space_t *space, uint64_t virt, uint64_t phys,
-                 uint64_t flags);
-int vmm_unmap_page(address_space_t *space, uint64_t virt);
-uint64_t vmm_get_phys(address_space_t *space, uint64_t virt);
+void vmm_kernel_heap_alloc(ulong offset, ulong size);
+void vmm_kernel_heap_free(ulong offset, ulong size);
 
-int vmm_map_range(address_space_t *space, uint64_t virt, uint64_t phys,
-                  uint64_t size, uint64_t flags);
-int vmm_identity_map_range_2m(address_space_t *space, uint64_t start,
-                              uint64_t end, uint64_t flags);
-
-address_space_t *vmm_create_address_space(void);
-void vmm_destroy_address_space(address_space_t *space);
+// address_space *vmm_get_kernel_space();
+void vmm_map_pages(address_space *space, ulong virtual_addr,
+                   ulong phys_addr, ulong page_count, ulong flags);
+void vmm_map_bytes(address_space *space, ulong virtual_addr,
+                   ulong phys_addr, ulong size, ulong flags);

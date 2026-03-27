@@ -1,7 +1,9 @@
 #include "keyboard.h"
+#include "idt.h"
 #include "io.h"
 #include "keys.h"
 #include "pic.h"
+#include "serial.h"
 
 static int extended = 0;
 static volatile KeyEvent g_last = {KEY_NONE, 0};
@@ -93,18 +95,7 @@ static char scancode_set1_to_ascii(uint8_t sc) {
   }
 }
 
-void keyboard_init(void) {
-  // Nothing needed yet for simple PS/2 receive path
-}
-
-KeyEvent keyboard_last(void) {
-  KeyEvent event = g_last;
-  g_last.code = KEY_NONE;
-  g_last.character = 0;
-  return event;
-}
-
-void isr33_handler(void) {
+void on_key_event(void) {
   uint8_t sc = inb(0x60);
 
   // Extended prefix
@@ -155,5 +146,18 @@ void isr33_handler(void) {
     g_last = ev;
   }
 
+  if (ev.character)
+    serial_write_char(ev.character);
   pic_send_eoi(1);
+}
+
+void keyboard_init(void) {
+  register_interrupt_handler(33, (interrupt_handler_t)on_key_event);
+}
+
+KeyEvent keyboard_last(void) {
+  KeyEvent event = g_last;
+  g_last.code = KEY_NONE;
+  g_last.character = 0;
+  return event;
 }

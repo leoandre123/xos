@@ -52,4 +52,5 @@ qemu-system-x86_64 \
     -m 256M \
     -drive if=pflash,format=raw,readonly=on,file="$CODE_FD" \
     -drive if=pflash,format=raw,file="$BUILD_DIR/OVMF_VARS.fd" \
-    -drive format=raw,file=fat:rw:"$ESP_DIR"
+    -drive format=raw,file=fat:rw:"$ESP_DIR" \
+    -serial stdio
