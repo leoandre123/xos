@@ -1,13 +1,10 @@
 #include "vmm.h"
 #include "boot_info.h"
+#include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "panic.h"
-#include "serial.h"
 #include "types.h"
-
-#define PHYS_TO_HHDM(p) ((void *)((ulong)(p) + HHDM_BASE))
-#define HHDM_TO_PHYS(v) ((ulong)(v) - HHDM_BASE)
 
 #define SIZE_TO_PAGE_COUNT(size) (size + PAGE_SIZE - 1) / PAGE_SIZE;
 

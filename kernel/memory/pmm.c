@@ -1,22 +1,21 @@
 #include "pmm.h"
+#include "io/serial.h"
 #include "memory.h"
 #include "panic.h"
-#include "serial.h"
 #include "types.h"
-#include <stdint.h>
 
 typedef struct {
-  uint64_t total_memory;
-  uint64_t usable_memory;
-  uint64_t reserved_memory;
-  uint64_t used_memory;
+  ulong total_memory;
+  ulong usable_memory;
+  ulong reserved_memory;
+  ulong used_memory;
 
-  uint64_t page_count;
+  ulong page_count;
 
-  uint8_t *bitmap;
-  uint64_t bitmap_size;
+  ubyte *bitmap;
+  ulong bitmap_size;
 
-  uint64_t last_index;
+  ulong last_index;
   ulong max_address;
 } pmm_state_t;
 
@@ -27,56 +26,56 @@ extern char __kernel_virt_end[];
 
 static pmm_state_t g_pmm;
 
-static inline uint64_t addr_to_page(uint64_t addr) { return (addr) >> 12; }
-static inline uint64_t page_to_addr(uint64_t page) { return page << 12; }
+static inline ulong addr_to_page(ulong addr) { return (addr) >> 12; }
+static inline ulong page_to_addr(ulong page) { return page << 12; }
 
-static void memset8(uint8_t *ptr, uint8_t value, uint64_t count) {
-  for (uint64_t i = 0; i < count; i++) {
+static void memset8(ubyte *ptr, ubyte value, ulong count) {
+  for (ulong i = 0; i < count; i++) {
     ptr[i] = value;
   }
 }
 
-static inline void bitmap_set(uint64_t bit) {
+static inline void bitmap_set(ulong bit) {
   g_pmm.bitmap[bit / 8] |= (1 << (bit % 8));
 }
 
-static inline void bitmap_clear(uint64_t bit) {
+static inline void bitmap_clear(ulong bit) {
   g_pmm.bitmap[bit / 8] &= ~(1 << (bit % 8));
 }
 
-static inline int bitmap_test(uint64_t bit) {
+static inline int bitmap_test(ulong bit) {
   return (g_pmm.bitmap[bit / 8] >> (bit % 8)) & 1;
 }
 
-static void pmm_reserve_page(uint64_t addr) {
-  uint64_t page = addr_to_page(addr);
+static void pmm_reserve_page(ulong addr) {
+  ulong page = addr_to_page(addr);
   if (!bitmap_test(page)) {
     bitmap_set(page);
     g_pmm.used_memory += 4096;
   }
 }
-static void pmm_unreserve_page(uint64_t addr) {
-  uint64_t page = addr_to_page(addr);
+static void pmm_unreserve_page(ulong addr) {
+  ulong page = addr_to_page(addr);
   if (bitmap_test(page)) {
     bitmap_clear(page);
     g_pmm.used_memory -= 4096;
   }
 }
 
-static void pmm_reserve_region(uint64_t addr, int size) {
-  uint64_t start = (addr & ~0xFFFULL);
-  uint64_t end = (addr + size + 0xFFFULL) & ~0xFFFULL;
-  uint64_t pages = (end - start) / 4096;
+static void pmm_reserve_region(ulong addr, int size) {
+  ulong start = (addr & ~0xFFFULL);
+  ulong end = (addr + size + 0xFFFULL) & ~0xFFFULL;
+  ulong pages = (end - start) / 4096;
 
-  for (uint64_t i = 0; i < pages; i++)
+  for (ulong i = 0; i < pages; i++)
     pmm_reserve_page(start + i * 4096);
 }
 
 void pmm_init(BootInfo *boot_info) {
 
-  uint64_t page_count = 0;
-  uint8_t *cur = (uint8_t *)(uint64_t)boot_info->memory_map;
-  uint8_t *end = cur + boot_info->memory_map_size;
+  ulong page_count = 0;
+  ubyte *cur = (ubyte *)(ulong)boot_info->memory_map;
+  ubyte *end = cur + boot_info->memory_map_size;
 
   while (cur < end) {
     EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
@@ -91,12 +90,12 @@ void pmm_init(BootInfo *boot_info) {
   g_pmm.last_index = 0;
   g_pmm.max_address = 0;
 
-  cur = (uint8_t *)(uint64_t)boot_info->memory_map;
+  cur = (ubyte *)(ulong)boot_info->memory_map;
   while (cur < end) {
     EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
 
     if (desc->Type == 7 && desc->NumberOfPages * 4096ULL >= g_pmm.bitmap_size) {
-      g_pmm.bitmap = (uint8_t *)desc->PhysicalStart;
+      g_pmm.bitmap = (ubyte *)desc->PhysicalStart;
       break;
     }
 
@@ -108,12 +107,12 @@ void pmm_init(BootInfo *boot_info) {
 
   memset8(g_pmm.bitmap, 0xFF, g_pmm.bitmap_size);
 
-  cur = (uint8_t *)(uint64_t)boot_info->memory_map;
+  cur = (ubyte *)(ulong)boot_info->memory_map;
   while (cur < end) {
     EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
 
     if (desc->Type == 7) {
-      for (uint64_t i = 0; i < desc->NumberOfPages; i++) {
+      for (ulong i = 0; i < desc->NumberOfPages; i++) {
         ulong addr = (desc->PhysicalStart) + i * 4096ULL;
         pmm_unreserve_page(addr);
         g_pmm.max_address = addr;
@@ -123,7 +122,7 @@ void pmm_init(BootInfo *boot_info) {
   }
 
   pmm_reserve_page(0);
-  pmm_reserve_region((uint64_t)g_pmm.bitmap, g_pmm.bitmap_size);
+  pmm_reserve_region((ulong)g_pmm.bitmap, g_pmm.bitmap_size);
   pmm_reserve_region(((ulong)__kernel_phys_start),
                      ((ulong)__kernel_phys_end) - ((ulong)__kernel_phys_start));
 
@@ -133,7 +132,7 @@ void pmm_init(BootInfo *boot_info) {
 }
 
 ulong pmm_alloc_page() {
-  for (uint64_t i = g_pmm.last_index; i < g_pmm.page_count; i++) {
+  for (ulong i = g_pmm.last_index; i < g_pmm.page_count; i++) {
     if (!bitmap_test(i)) {
       bitmap_set(i);
       g_pmm.used_memory += 4096;
@@ -142,7 +141,7 @@ ulong pmm_alloc_page() {
     }
   }
 
-  for (uint64_t i = 0; i < g_pmm.last_index; i++) {
+  for (ulong i = 0; i < g_pmm.last_index; i++) {
     if (!bitmap_test(i)) {
       bitmap_set(i);
       g_pmm.used_memory += 4096;
@@ -155,9 +154,9 @@ ulong pmm_alloc_page() {
 }
 
 void pmm_free_page(ulong addr) {
-  uint64_t page = addr_to_page(addr);
+  ulong page = addr_to_page(addr);
 
-  if (((uint64_t)addr & 0xFFFULL) != 0) {
+  if (((ulong)addr & 0xFFFULL) != 0) {
     panic("PMM free unaligned address");
   }
   if (page >= g_pmm.page_count) {
@@ -178,7 +177,7 @@ void pmm_free_page(ulong addr) {
 ulong pmm_alloc_pages(uint count) {
   uint current_count = 0;
   ulong first_page = 0;
-  for (uint64_t i = g_pmm.last_index; i < g_pmm.page_count; i++) {
+  for (ulong i = g_pmm.last_index; i < g_pmm.page_count; i++) {
     if (bitmap_test(i)) {
       current_count = 0;
     } else {
@@ -197,7 +196,7 @@ ulong pmm_alloc_pages(uint count) {
     }
   }
   current_count = 0;
-  for (uint64_t i = 0; i < g_pmm.last_index; i++) {
+  for (ulong i = 0; i < g_pmm.last_index; i++) {
     if (bitmap_test(i)) {
       current_count = 0;
     } else {

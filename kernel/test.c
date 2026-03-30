@@ -1,11 +1,11 @@
 #include "test.h"
-#include "console.h"
+#include "graphics/console.h"
 #include "graphics/gfx.h"
 #include "io/keyboard.h"
 #include "io/keys.h"
+#include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/vmm.h"
-#include "serial.h"
 
 void test_heap() {
   heap *kernel_heap = get_kernel_heap();

@@ -14,7 +14,7 @@ jump_to_userspace:
     push 0x23       ; ss  (user data | RPL=3)
     push rsi        ; rsp (user stack)
     push 0x202      ; rflags (IF=1)
-    push 0x1B       ; cs  (user code | RPL=3)
+    push 0x2B       ; cs  (user code 64 | RPL=3)
     push rdi        ; rip (entry point)
     iretq
 

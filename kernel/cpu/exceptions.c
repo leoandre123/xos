@@ -1,6 +1,6 @@
 #include "exceptions.h"
 #include "idt.h"
-#include "serial.h"
+#include "io/serial.h"
 static const char *g_exception_names[32] = {
     "Divide Error",                   // 0
     "Debug",                          // 1
@@ -126,6 +126,12 @@ void default_handler(interrupt_frame *frame) {
   }
 }
 
+void breakpoint_handler(interrupt_frame *frame) {
+  serial_write_line(g_exception_names[frame->vector]);
+  dump_frame(frame);
+}
+
 void exceptions_init() {
   register_default_handler((interrupt_handler_t)default_handler);
+  register_interrupt_handler(3, (interrupt_handler_t)breakpoint_handler);
 }

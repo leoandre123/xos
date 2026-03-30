@@ -1,22 +1,25 @@
 #include "../shared/boot_info.h"
-#include "console.h"
-#include "exceptions.h"
-#include "gdt.h"
+#include "cpu/exceptions.h"
+#include "cpu/gdt.h"
+#include "cpu/idt.h"
+#include "cpu/syscall.h"
+#include "filesystem/elf.h"
+#include "filesystem/fat32.h"
+#include "graphics/console.h"
 #include "graphics/gfx.h"
-#include "idt.h"
+#include "io/ata.h"
 #include "io/keyboard.h"
 #include "io/keys.h"
 #include "io/pic.h"
+#include "io/serial.h"
 #include "io/timer.h"
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
 #include "scheduler/scheduler.h"
-#include "serial.h"
 #include "test.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
 static uint fb_width;
 static uint fb_height;
@@ -62,7 +65,7 @@ void isr0_handler(void) {
 
 void isr3_handler(void) { console_write("EXCEPTION: Breakpoint\n"); }
 
-void isr13_handler(uint64_t error_code) {
+void isr13_handler(ulong error_code) {
   console_write("EXCEPTION: General Protection Fault, error = 0x");
   console_write_hex64(error_code);
   console_write("\n");
@@ -72,8 +75,8 @@ void isr13_handler(uint64_t error_code) {
   }
 }
 
-void isr14_handler(uint64_t error_code) {
-  uint64_t cr2;
+void isr14_handler(ulong error_code) {
+  ulong cr2;
   asm volatile("mov %%cr2, %0" : "=r"(cr2));
 
   console_write("EXCEPTION: Page Fault, error = 0x");
@@ -87,22 +90,22 @@ void isr14_handler(uint64_t error_code) {
   }
 }
 /*
-static void draw_rect(volatile uint32_t *fb, uint32_t pitch_pixels, uint32_t x,
-                      uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-  for (uint32_t yy = y; yy < y + h; yy++) {
-    for (uint32_t xx = x; xx < x + w; xx++) {
+static void draw_rect(volatile uint *fb, uint pitch_pixels, uint x,
+                      uint y, uint w, uint h, uint color) {
+  for (uint yy = y; yy < y + h; yy++) {
+    for (uint xx = x; xx < x + w; xx++) {
       put_pixel(fb, pitch_pixels, xx, yy, color);
     }
   }
 }
 
 void test_pmm_alloc_many(void) {
-  uint64_t pages[256];
+  ulong pages[256];
 
   for (int i = 0; i < 256; i++) {
     pages[i] = pmm_alloc_page();
     ASSERT(pages[i] != 0);
-    ASSERT(((uint64_t)pages[i] & 0xFFF) == 0);
+    ASSERT(((ulong)pages[i] & 0xFFF) == 0);
 
     for (int j = 0; j < i; j++) {
       ASSERT(pages[i] != pages[j]);
@@ -130,15 +133,34 @@ void memory_test() {
   console_set_fg_color(0x00ffffff);
 }
 */
+
+void drive_test() {
+  serial_write_line("====DRIVE TEST====");
+  char buf[512];
+  ata_read(0, 1, &buf);
+  serial_write(buf);
+  for (int i = 0; i < 10; i++) {
+    serial_write_hex(i);
+    serial_write(": ");
+    serial_write_hex(buf[i]);
+    serial_write("   - ");
+    serial_write_char(buf[i]);
+    serial_write_char('\n');
+  }
+  serial_write(buf);
+  serial_write_char('\n');
+  serial_write_line("==================");
+}
+
 static void draw_menu_item(int index, const char *text, int selection) {
   console_write(selection == index ? "> " : "  ");
   console_write(text);
   console_write("\n");
 }
-
+/*
 static void menu() {
 
-  uint32_t bg = 0x00101050;
+  uint bg = 0x00101050;
   int selection = 0;
 
   for (;;) {
@@ -148,7 +170,8 @@ static void menu() {
     draw_menu_item(0, "Test Heap", selection);
     draw_menu_item(1, "Run Memory Test", selection);
     draw_menu_item(2, "0/0", selection);
-    draw_menu_item(3, "Power down", selection);
+    draw_menu_item(3, "Read from disk", selection);
+    draw_menu_item(4, "Power down", selection);
 
     KeyEvent ev;
     while ((ev = keyboard_last()).code == KEY_NONE) {
@@ -157,7 +180,7 @@ static void menu() {
 
     if (ev.code == KEY_UP && selection > 0)
       selection--;
-    if (ev.code == KEY_DOWN && selection < 2)
+    if (ev.code == KEY_DOWN && selection < 4)
       selection++;
     if (ev.code == KEY_RETURN) {
       switch (selection) {
@@ -176,21 +199,23 @@ static void menu() {
         break;
       }
       case 3:
+        drive_test();
+        break;
+      case 4:
         break;
       }
       selection = 0;
     }
-    schedule();
   }
 }
-
+*/
 void task_2() {
   int x = 0;
   while (1) {
     serial_write("Task 2: ");
     serial_write_ulong(x++);
     serial_write_char('\n');
-    schedule();
+    // schedule();
   }
 }
 
@@ -221,6 +246,9 @@ void kernel_pre_main(BootInfo *boot_info) {
 }
 
 // FE
+
+// DM
+// DAFNE
 void kernel_main() {
   serial_write_line("LeOS!");
   serial_write_line("Hello from kernel!");
@@ -241,6 +269,7 @@ void kernel_main() {
   console_write_line("Hello, World!");
 
   gdt_init();
+  syscall_init();
   idt_init();
 
   pic_remap(32, 40);
@@ -250,22 +279,62 @@ void kernel_main() {
 
   exceptions_init();
   keyboard_init();
-  timer_init();
+
+  ata_init();
+  fat32_init(0);
+
+  fat32_print_root();
+
+  fat32_file *f0 = fat32_open("/a_very_long_filename_is_here_right_here.txt");
+  fat32_file *f1 = fat32_open("/hello.txt");
+  fat32_file *f2 = fat32_open("/a.b.txt");
+  serial_write("BEFORE PF");
+  fat32_file *f3 = fat32_open("/subfolder/hello.txt");
+  serial_write("AFTER PF");
+  ubyte *file_buf0 = kmalloc(f0->size);
+  ubyte *file_buf1 = kmalloc(f1->size);
+  ubyte *file_buf2 = kmalloc(f2->size);
+  ubyte *file_buf3 = kmalloc(f3->size);
+  fat32_read(f0, file_buf0, f0->size);
+  fat32_read(f1, file_buf1, f1->size);
+  fat32_read(f2, file_buf2, f2->size);
+  fat32_read(f3, file_buf3, f3->size);
+
+  serial_write(file_buf0);
+  serial_write(file_buf1);
+  serial_write(file_buf2);
+  serial_write(file_buf3);
+
+  // fat32_file files[] = fat32_get_files();
 
   //
+
   serial_write("ENABLING STI...");
   asm volatile("sti");
+  // asm volatile("cli");
   serial_write_line("DONE!");
   asm volatile("int $32");
   asm volatile("int $33");
 
+  // asm volatile("int $3");
+
   scheduler_init();
-  task *menu_task = task_create_kernel(menu, 0, "KERNEL_MENU");
-  task *task_ = task_create_kernel(task_2, 0, "TASK_2");
-  // task *user_task = task_create_user(user_hello, 0, "USER_TASK");
-  scheduler_add(menu_task);
-  scheduler_add(task_);
+  serial_write_line("Scheduler initilized!");
+
+  fat32_file *shell_file = fat32_open("/shell.elf");
+  if (!shell_file)
+    panic("Cannot find /shell.elf on disk");
+  task *shell_task = elf_load(shell_file);
+  if (!shell_task)
+    panic("Failed to load shell ELF");
+  serial_write_hex((ulong)shell_task);
+  serial_write_line("Tasks created!");
+  scheduler_add(shell_task);
+
+  serial_write_line("Tasks loaded!");
   // scheduler_add(user_task);
+
+  timer_init(47);
   scheduler_run();
 
   serial_write("Goodbye from kernel!");

@@ -1,26 +1,28 @@
-#include "idt.h"
+#include "timer.h"
+#include "cpu/idt.h"
 #include "io/io.h"
 #include "io/pic.h"
+#include "io/serial.h"
 #include "scheduler/scheduler.h"
-#include <stdint.h>
+#include "types.h"
 #define PIT_COMMAND        0x43
 #define PIT_CHANNEL0       0x40
 #define PIT_BASE_FREQUENCY 1193182
 
-volatile int g_timer_ticks = 0;
+int g_timer_ticks = 0;
 
 void timer_handler() {
   g_timer_ticks++;
-  pic_send_eoi(0);
+  // serial_write("-t-");
   schedule();
 }
 
-void timer_init(uint32_t frequency) {
+void timer_init(uint frequency) {
   if (frequency == 0) {
     frequency = 100;
   }
 
-  uint16_t divisor = (uint16_t)(PIT_BASE_FREQUENCY / frequency);
+  ushort divisor = (ushort)(PIT_BASE_FREQUENCY / frequency);
 
   // Command byte:
   // 00 = channel 0
@@ -30,8 +32,8 @@ void timer_init(uint32_t frequency) {
   outb(PIT_COMMAND, 0x34);
 
   // Send divisor low byte then high byte
-  outb(PIT_CHANNEL0, (uint8_t)(divisor & 0xFF));
-  outb(PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xFF));
+  outb(PIT_CHANNEL0, (ubyte)(divisor & 0xFF));
+  outb(PIT_CHANNEL0, (ubyte)((divisor >> 8) & 0xFF));
 
   register_interrupt_handler(32, timer_handler);
 }

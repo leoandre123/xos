@@ -24,6 +24,9 @@
 
 #define PAGE_ADDR_MASK 0x000FFFFFFFFFF000ULL
 
+#define PHYS_TO_HHDM(p) ((void *)((ulong)(p) + HHDM_BASE))
+#define HHDM_TO_PHYS(v) ((ulong)(v) - HHDM_BASE)
+
 typedef struct {
   ulong entries[512];
 } page_table;

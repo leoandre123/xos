@@ -1,14 +1,15 @@
 #include "keyboard.h"
-#include "idt.h"
+#include "cpu/idt.h"
 #include "io.h"
 #include "keys.h"
 #include "pic.h"
 #include "serial.h"
+#include "types.h"
 
 static int extended = 0;
 static volatile KeyEvent g_last = {KEY_NONE, 0};
 
-static char scancode_set1_to_ascii(uint8_t sc) {
+static char scancode_set1_to_ascii(ubyte sc) {
   switch (sc) {
   case 0x02:
     return '1';
@@ -96,7 +97,7 @@ static char scancode_set1_to_ascii(uint8_t sc) {
 }
 
 void on_key_event(void) {
-  uint8_t sc = inb(0x60);
+  ubyte sc = inb(0x60);
 
   // Extended prefix
   if (sc == 0xE0) {
@@ -133,6 +134,7 @@ void on_key_event(void) {
   } else {
     if (sc == 0x1C) {
       ev.code = KEY_RETURN;
+      ev.character = '\n';
     } else {
       char c = scancode_set1_to_ascii(sc);
       if (c) {

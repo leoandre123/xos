@@ -3,7 +3,7 @@ LD = ld
 AS = nasm
 OBJCOPY = objcopy
 
-CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -m64 -mcmodel=kernel -O2 -Wall -Wextra \
+CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic -m64 -mcmodel=kernel -O2 -Wall -Wextra \
          -I. -I../shared
 LDFLAGS = -T linker.ld
 

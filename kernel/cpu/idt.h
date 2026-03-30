@@ -1,20 +1,19 @@
 #pragma once
 #include "types.h"
-#include <stdint.h>
 
 struct idt_entry {
-  uint16_t offset_low;
-  uint16_t selector;
-  uint8_t ist;
-  uint8_t type_attr;
-  uint16_t offset_mid;
-  uint32_t offset_high;
-  uint32_t zero;
+  ushort offset_low;
+  ushort selector;
+  ubyte ist;
+  ubyte type_attr;
+  ushort offset_mid;
+  uint offset_high;
+  uint zero;
 } __attribute__((packed));
 
 struct idt_ptr {
-  uint16_t limit;
-  uint64_t base;
+  ushort limit;
+  ulong base;
 } __attribute__((packed));
 
 typedef struct interrupt_frame {
@@ -38,6 +37,6 @@ typedef struct interrupt_frame {
 } interrupt_frame;
 typedef void (*interrupt_handler_t)(interrupt_frame *frame);
 
-uint16_t idt_init(void);
+ushort idt_init(void);
 void register_interrupt_handler(int vector, interrupt_handler_t handler);
 void register_default_handler(interrupt_handler_t handler);

@@ -1,6 +1,7 @@
 #pragma once
-#include <stdint.h>
 
-uint8_t inb(uint16_t port);
-void outb(uint16_t port, uint8_t value);
+#include "types.h"
+ubyte inb(ushort port);
+ushort inw(ushort port);
+void outb(ushort port, ubyte value);
 void io_wait(void);

@@ -1,7 +1,7 @@
 #include "heap.h"
+#include "io/serial.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
-#include "serial.h"
 #include "types.h"
 #include "utils/assert.h"
 #include "utils/math.h"

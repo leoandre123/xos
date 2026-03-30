@@ -50,20 +50,20 @@ for code in range(FIRST_CHAR, LAST_CHAR + 1):
 
 with open(OUTPUT_H, "w", encoding="utf-8") as f:
     f.write("#pragma once\n")
-    f.write("#include <stdint.h>\n\n")
+    f.write("#include \"types.h\"\n\n")
     f.write(f"#define FONT_FIRST_CHAR {FIRST_CHAR}\n")
     f.write(f"#define FONT_LAST_CHAR {LAST_CHAR}\n")
     f.write(f"#define FONT_GLYPH_WIDTH {GLYPH_WIDTH}\n")
     f.write(f"#define FONT_GLYPH_HEIGHT {GLYPH_HEIGHT}\n")
     f.write(f"#define FONT_GLYPH_COUNT {LAST_CHAR - FIRST_CHAR + 1}\n\n")
     f.write(
-        f"extern const uint8_t kernel_font[FONT_GLYPH_COUNT][FONT_GLYPH_HEIGHT];\n"
+        f"extern const ubyte kernel_font[FONT_GLYPH_COUNT][FONT_GLYPH_HEIGHT];\n"
     )
 
 with open(OUTPUT_C, "w", encoding="utf-8") as f:
     f.write('#include "font.h"\n\n')
     f.write(
-        f"const uint8_t kernel_font[FONT_GLYPH_COUNT][FONT_GLYPH_HEIGHT] = {{\n"
+        f"const ubyte kernel_font[FONT_GLYPH_COUNT][FONT_GLYPH_HEIGHT] = {{\n"
     )
 
     for code in range(FIRST_CHAR, LAST_CHAR + 1):

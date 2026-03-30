@@ -2,8 +2,8 @@
 #include "types.h"
 
 struct gdt_ptr {
-  uint16_t limit;
-  uint64_t base;
+  ushort limit;
+  ulong base;
 } __attribute__((packed));
 
 typedef struct {
@@ -29,7 +29,7 @@ typedef struct {
   uint reserved;
 } __attribute__((packed)) tss_descriptor_t;
 
-static uint64_t gdt[7];
+static ulong gdt[8];
 static struct gdt_ptr gdtr;
 static tss_t g_tss;
 
@@ -57,15 +57,16 @@ void gdt_set_kernel_stack(ulong rsp0) {
 
 void gdt_init(void) {
   gdt[0] = 0x0000000000000000ULL; // null
-  gdt[1] = 0x00AF9A000000FFFFULL; // kernel code
-  gdt[2] = 0x00AF92000000FFFFULL; // kernel data
-  gdt[3] = 0x00AFFA000000FFFFULL; // user code
-  gdt[4] = 0x00AFF2000000FFFFULL; // user data
-  gdt_set_tss(5, &g_tss);
+  gdt[1] = 0x00AF9A000000FFFFULL; // kernel code   (0x08)
+  gdt[2] = 0x00AF92000000FFFFULL; // kernel data   (0x10)
+  gdt[3] = 0x00CFFA000000FFFFULL; // user code 32  (0x18) — sysret placeholder
+  gdt[4] = 0x00AFF2000000FFFFULL; // user data     (0x20, sel 0x23)
+  gdt[5] = 0x00AFFA000000FFFFULL; // user code 64  (0x28, sel 0x2B)
+  gdt_set_tss(6, &g_tss);         //               (0x30)
 
   gdtr.limit = sizeof(gdt) - 1;
-  gdtr.base = (uint64_t)&gdt[0];
+  gdtr.base = (ulong)&gdt[0];
 
-  gdt_load_flush((uint64_t)&gdtr, 0x10);
+  gdt_load_flush((ulong)&gdtr, 0x10);
   tss_load(TSS_SEL);
 }
