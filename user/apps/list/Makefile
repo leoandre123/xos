@@ -1,2 +1,2 @@
-APP_NAME = terminal
+APP_NAME = list
 include ../../app.mk

@@ -10,8 +10,8 @@ static void print(const char *s) {
   sys_write_fd(1, s, slen(s));
 }
 
-void _start() {
+int main(void) {
   print("Hello from test_app!\n");
   print("12345\n");
-  sys_exit();
+  return 0;
 }

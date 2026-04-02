@@ -51,7 +51,7 @@ static void term_putc(char c) {
   }
 }
 
-void _start(void) {
+int main(void) {
   sys_write("Hello from terminal!\n");
   // Map framebuffer and clear screen
   gfx_map(&g_fb);

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 BOOTLOADER_DIR="$ROOT_DIR/bootloader/uefi"
 KERNEL_DIR="$ROOT_DIR/kernel"
+USER_DIR="$ROOT_DIR/user"
 BUILD_DIR="$ROOT_DIR/build"
 ESP_DIR="$BUILD_DIR/esp"
 
@@ -19,26 +20,26 @@ make clean
 make
 
 echo "==== Building user apps ===="
-cd "$ROOT_DIR/user/apps/test_app"
-make clean
-make
-
-cd "$ROOT_DIR/user/apps/shell"
-make clean
-make
-
-cd "$ROOT_DIR/user/apps/terminal"
-make clean
-make
-
-echo "==== Copying user apps to disk ===="
 if ! command -v mcopy &>/dev/null; then
     echo "ERROR: mtools not found. Run: sudo apt install mtools"
     exit 1
 fi
-mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/test_app/build/test_app.elf" ::/test_app.elf
-mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/shell/build/shell.elf" ::/shell.elf
-mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/terminal/build/terminal.elf" ::/terminal.elf
+
+for app_dir in "$USER_DIR/apps"/*/; do
+    [ -f "$app_dir/Makefile" ] || continue
+    echo "  Building $(basename "$app_dir")..."
+    cd "$app_dir"
+    make clean
+    make
+done
+
+echo "==== Copying user apps to disk ===="
+for elf in "$USER_DIR/apps"/*/build/*.elf; do
+    [ -f "$elf" ] || continue
+    elf_name="$(basename "$elf")"
+    echo "  Copying $elf_name..."
+    mcopy -D o -i "$ROOT_DIR/disk.bin" "$elf" "::/$elf_name"
+done
 
 echo "==== Preparing EFI filesystem ===="
 rm -rf "$ESP_DIR"
