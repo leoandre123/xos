@@ -17,6 +17,8 @@ static task *g_task_list = 0;
 static task *g_idle = 0;
 static int g_next_pid = 1;
 
+task *scheduler_current(void) { return g_current; }
+
 __attribute__((noreturn)) void task_exit(void) {
   g_current->state = TASK_DEAD;
 
@@ -84,10 +86,15 @@ static inline task *task_create(void (*entry)(void *), void *args, const char *n
   t->stack_size = 4096;
   t->next = 0;
   t->state = TASK_READY;
-  t->name = name;
   t->entry = entry;
   t->args = args;
   t->address_space = space;
+
+  int i = 0;
+  while (name[i] != '\0') {
+    t->name[i] = name[i];
+    i++;
+  }
 
   ulong *sp = stack + 4096;
   sp = (void *)((ulong)sp & ~0xFULL);
@@ -135,10 +142,12 @@ void schedule() {
   }
 }
 task *scheduler_find(int pid) {
-  if (!g_task_list) return 0;
+  if (!g_task_list)
+    return 0;
   task *t = g_task_list;
   do {
-    if (t->pid == pid) return t;
+    if (t->pid == pid)
+      return t;
     t = t->next;
   } while (t != g_task_list);
   return 0;
@@ -176,14 +185,14 @@ task *task_create_user(void (*entry)(void *), void *args, const char *name) {
   vmm_map_pages(space, user_stack_base, phys_stack, USER_STACK_PAGES,
                 PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
 
-  t->user_rsp = (void *)USER_STACK_TOP; // where rsp points when entering ring 3
+  t->user_rsp = (void *)USER_STACK_TOP - 8; // where rsp points when entering ring 3
   ulong *sp = t->rsp;
   sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
 
   return t;
 }
-task *task_create_user_from_space(address_space *space, void *entry) {
-  task *t = task_create(entry, 0, "test", space);
+task *task_create_user_from_space(address_space *space, void *entry, const char *name, const char *wd) {
+  task *t = task_create(entry, 0, name, space);
 
   // allocate and map user stack
   ulong phys_stack = pmm_alloc_pages(USER_STACK_PAGES);
@@ -191,9 +200,14 @@ task *task_create_user_from_space(address_space *space, void *entry) {
   vmm_map_pages(space, user_stack_base, phys_stack, USER_STACK_PAGES,
                 PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
 
-  t->user_rsp = (void *)USER_STACK_TOP; // where rsp points when entering ring 3
+  t->user_rsp = (void *)USER_STACK_TOP - 8; // where rsp points when entering ring 3
   ulong *sp = t->rsp;
   sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
 
+  int i = 0;
+  while (wd[i] != '\0') {
+    t->working_directory[i] = wd[i];
+    i++;
+  }
   return t;
 }

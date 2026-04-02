@@ -43,4 +43,4 @@ typedef struct {
   ulong alignment;
 } __attribute__((packed)) elf_program_header;
 
-task *elf_load(fat32_file *file_handle);
+task *elf_load(fat32_file *file_handle, const char *name, const char *wd);

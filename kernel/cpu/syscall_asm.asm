@@ -4,9 +4,6 @@ global syscall_entry
 extern syscall_dispatch
 extern g_syscall_kernel_rsp
 
-section .data
-g_syscall_user_rsp: dq 0
-
 section .text
 
 syscall_entry:
@@ -18,9 +15,14 @@ syscall_entry:
     ;   RDI = arg1, RSI = arg2, RDX = arg3
     ;   IF is cleared
 
-    ; Switch to kernel stack
-    mov [g_syscall_user_rsp], rsp
+    ; Switch to kernel stack.
+    ; Use R10 as scratch (caller-saved, already listed as clobber in user syscall asm).
+    ; Push user RSP onto the kernel stack so it is saved per-task — a global would be
+    ; overwritten if schedule() switches to another task that also makes a syscall.
+    mov r10, rsp
     mov rsp, [g_syscall_kernel_rsp]
+    push r10                ; user RSP now lives on this task's kernel stack
+
     ; Save return address, flags, and callee-saved registers
     push rcx
     push r11
@@ -61,9 +63,9 @@ syscall_entry:
     pop r11
     pop rcx
 
-    ; Restore user stack
-    mov rsp, [g_syscall_user_rsp]
-  
+    ; Restore user RSP from kernel stack and switch back to user stack in one step.
+    pop rsp
+
     o64 sysret
 
 section .note.GNU-stack noalloc noexec nowrite progbits

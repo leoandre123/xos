@@ -34,6 +34,12 @@ typedef struct interrupt_frame {
   ulong r15;
   ulong vector;
   ulong error_code;
+
+  ulong rip;
+  ulong cs;
+  ulong rflags;
+  ulong rsp; // only valid if coming from lower privilege
+  ulong ss;  // only valid if coming from lower privilege
 } interrupt_frame;
 typedef void (*interrupt_handler_t)(interrupt_frame *frame);
 

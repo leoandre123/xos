@@ -27,6 +27,10 @@ cd "$ROOT_DIR/user/apps/shell"
 make clean
 make
 
+cd "$ROOT_DIR/user/apps/terminal"
+make clean
+make
+
 echo "==== Copying user apps to disk ===="
 if ! command -v mcopy &>/dev/null; then
     echo "ERROR: mtools not found. Run: sudo apt install mtools"
@@ -34,6 +38,7 @@ if ! command -v mcopy &>/dev/null; then
 fi
 mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/test_app/build/test_app.elf" ::/test_app.elf
 mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/shell/build/shell.elf" ::/shell.elf
+mcopy -D o -i "$ROOT_DIR/disk.bin" "$ROOT_DIR/user/apps/terminal/build/terminal.elf" ::/terminal.elf
 
 echo "==== Preparing EFI filesystem ===="
 rm -rf "$ESP_DIR"

@@ -7,7 +7,7 @@
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 
-task *elf_load(fat32_file *file_handle) {
+task *elf_load(fat32_file *file_handle, const char *name, const char *wd) {
   ubyte *data = kmalloc(file_handle->size);
   fat32_read(file_handle, data, file_handle->size);
 
@@ -41,5 +41,5 @@ task *elf_load(fat32_file *file_handle) {
   ulong entry = hdr->program_entry;
   kfree(data);
 
-  return task_create_user_from_space(space, (void *)entry);
+  return task_create_user_from_space(space, (void *)entry, name, wd);
 }

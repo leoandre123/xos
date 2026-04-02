@@ -17,13 +17,13 @@
 #include "memory/pmm.h"
 #include "memory/vmm.h"
 #include "scheduler/scheduler.h"
-#include "test.h"
 #include <stdbool.h>
 #include <stddef.h>
 
-static uint fb_width;
-static uint fb_height;
-static uint fb_pitch;
+uint g_fb_width;
+uint g_fb_height;
+uint g_fb_pitch;
+ulong g_fb_phys;
 
 extern void enter_kernel_main(ulong stack_addr);
 
@@ -56,186 +56,17 @@ void panic_assert(const char *file, int line, const char *expr) {
   }
 }
 
-void isr0_handler(void) {
-  console_write("EXCESSSPTION: Divide by zero\n");
-  for (;;) {
-    asm volatile("hlt");
-  }
-}
-
-void isr3_handler(void) { console_write("EXCEPTION: Breakpoint\n"); }
-
-void isr13_handler(ulong error_code) {
-  console_write("EXCEPTION: General Protection Fault, error = 0x");
-  console_write_hex64(error_code);
-  console_write("\n");
-
-  for (;;) {
-    asm volatile("hlt");
-  }
-}
-
-void isr14_handler(ulong error_code) {
-  ulong cr2;
-  asm volatile("mov %%cr2, %0" : "=r"(cr2));
-
-  console_write("EXCEPTION: Page Fault, error = 0x");
-  console_write_hex64(error_code);
-  console_write(", cr2 = 0x");
-  console_write_hex64(cr2);
-  console_write("\n");
-
-  for (;;) {
-    asm volatile("hlt");
-  }
-}
-/*
-static void draw_rect(volatile uint *fb, uint pitch_pixels, uint x,
-                      uint y, uint w, uint h, uint color) {
-  for (uint yy = y; yy < y + h; yy++) {
-    for (uint xx = x; xx < x + w; xx++) {
-      put_pixel(fb, pitch_pixels, xx, yy, color);
-    }
-  }
-}
-
-void test_pmm_alloc_many(void) {
-  ulong pages[256];
-
-  for (int i = 0; i < 256; i++) {
-    pages[i] = pmm_alloc_page();
-    ASSERT(pages[i] != 0);
-    ASSERT(((ulong)pages[i] & 0xFFF) == 0);
-
-    for (int j = 0; j < i; j++) {
-      ASSERT(pages[i] != pages[j]);
-    }
-  }
-
-  for (int i = 0; i < 256; i++) {
-    pmm_free_page(pages[i]);
-  }
-}
-
-void memory_test() {
-  console_clear(0);
-  console_set_fg_color(0x00ff0000);
-  console_write("MEMORY TEST");
-
-  test_pmm_alloc_many();
-
-  keyboard_last();
-  KeyEvent ev;
-  while ((ev = keyboard_last()).code == KEY_NONE) {
-    asm volatile("hlt");
-  }
-
-  console_set_fg_color(0x00ffffff);
-}
-*/
-
-void drive_test() {
-  serial_write_line("====DRIVE TEST====");
-  char buf[512];
-  ata_read(0, 1, &buf);
-  serial_write(buf);
-  for (int i = 0; i < 10; i++) {
-    serial_write_hex(i);
-    serial_write(": ");
-    serial_write_hex(buf[i]);
-    serial_write("   - ");
-    serial_write_char(buf[i]);
-    serial_write_char('\n');
-  }
-  serial_write(buf);
-  serial_write_char('\n');
-  serial_write_line("==================");
-}
-
-static void draw_menu_item(int index, const char *text, int selection) {
-  console_write(selection == index ? "> " : "  ");
-  console_write(text);
-  console_write("\n");
-}
-/*
-static void menu() {
-
-  uint bg = 0x00101050;
-  int selection = 0;
-
-  for (;;) {
-    console_clear(bg);
-    console_write_line("XOS - Kernel");
-
-    draw_menu_item(0, "Test Heap", selection);
-    draw_menu_item(1, "Run Memory Test", selection);
-    draw_menu_item(2, "0/0", selection);
-    draw_menu_item(3, "Read from disk", selection);
-    draw_menu_item(4, "Power down", selection);
-
-    KeyEvent ev;
-    while ((ev = keyboard_last()).code == KEY_NONE) {
-      asm volatile("hlt");
-    }
-
-    if (ev.code == KEY_UP && selection > 0)
-      selection--;
-    if (ev.code == KEY_DOWN && selection < 4)
-      selection++;
-    if (ev.code == KEY_RETURN) {
-      switch (selection) {
-      case 0:
-        test_heap();
-        break;
-      case 1:
-        // memory_test();
-        break;
-      case 2: {
-        uint y;
-        y = 5 / (2 - selection);
-        if (y) {
-          serial_write("CRASH");
-        }
-        break;
-      }
-      case 3:
-        drive_test();
-        break;
-      case 4:
-        break;
-      }
-      selection = 0;
-    }
-  }
-}
-*/
-void task_2() {
-  int x = 0;
-  while (1) {
-    serial_write("Task 2: ");
-    serial_write_ulong(x++);
-    serial_write_char('\n');
-    // schedule();
-  }
-}
-
-static void user_hello(void *args) {
-  // This runs in ring 3
-  // Can't call kernel functions directly here
-  // Just loop for now — a GPF here means ring 3 is working
-  for (;;) {
-  }
-}
-
 void kernel_pre_main(BootInfo *boot_info) {
   serial_init();
-  fb_width = boot_info->framebuffer_width;
-  fb_height = boot_info->framebuffer_height;
-  fb_pitch = boot_info->framebuffer_pitch;
+  g_fb_width = boot_info->framebuffer_width;
+  g_fb_height = boot_info->framebuffer_height;
+  g_fb_pitch = boot_info->framebuffer_pitch;
+  g_fb_phys = boot_info->framebuffer_base;
 
   pmm_init(boot_info);
   serial_write("PMM initilized!\n");
   vmm_init(boot_info);
+  pmm_remap_bitmap(0xFFFF800000000000ULL);
   serial_write("VMM initilized!\n");
 
   enter_kernel_main(KERNEL_STACK_TOP);
@@ -264,8 +95,8 @@ void kernel_main() {
 
   *((ulong *)FB_BASE) = 0x00ff0000;
 
-  gfx_init((uint *)FB_BASE, fb_width, fb_height, fb_pitch);
-  console_init(FB_BASE, fb_width, fb_height, fb_pitch);
+  gfx_init((uint *)FB_BASE, g_fb_width, g_fb_height, g_fb_pitch);
+  console_init(FB_BASE, g_fb_width, g_fb_height, g_fb_pitch);
   console_write_line("Hello, World!");
 
   gdt_init();
@@ -321,15 +152,15 @@ void kernel_main() {
   scheduler_init();
   serial_write_line("Scheduler initilized!");
 
-  fat32_file *shell_file = fat32_open("/shell.elf");
-  if (!shell_file)
-    panic("Cannot find /shell.elf on disk");
-  task *shell_task = elf_load(shell_file);
-  if (!shell_task)
-    panic("Failed to load shell ELF");
-  serial_write_hex((ulong)shell_task);
+  fat32_file *term_file = fat32_open("/terminal.elf");
+  if (!term_file)
+    panic("Cannot find /terminal.elf on disk");
+  task *term_task = elf_load(term_file, "terminal", "/");
+  if (!term_task)
+    panic("Failed to load terminal ELF");
+  serial_write_hex((ulong)term_task);
   serial_write_line("Tasks created!");
-  scheduler_add(shell_task);
+  scheduler_add(term_task);
 
   serial_write_line("Tasks loaded!");
   // scheduler_add(user_task);

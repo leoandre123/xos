@@ -131,6 +131,10 @@ void pmm_init(BootInfo *boot_info) {
   serial_write_char('\n');
 }
 
+void pmm_remap_bitmap(ulong hhdm_base) {
+  g_pmm.bitmap = (ubyte *)((ulong)g_pmm.bitmap + hhdm_base);
+}
+
 ulong pmm_alloc_page() {
   for (ulong i = g_pmm.last_index; i < g_pmm.page_count; i++) {
     if (!bitmap_test(i)) {

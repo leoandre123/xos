@@ -50,13 +50,19 @@ static void dump_frame(interrupt_frame *f) {
   // CPU-pushed iretq frame sits just after our saved registers
   ulong *cpu_frame = (ulong *)((ulong)f + sizeof(interrupt_frame));
   serial_write("rip:    ");
-  serial_write_hex(cpu_frame[0]);
+  serial_write_hex(f->rip);
   serial_write("\n");
   serial_write("cs:     ");
-  serial_write_hex(cpu_frame[1]);
+  serial_write_hex(f->cs);
   serial_write("\n");
   serial_write("rflags: ");
-  serial_write_hex(cpu_frame[2]);
+  serial_write_hex(f->rflags);
+  serial_write("\n");
+  serial_write("rsp: ");
+  serial_write_hex(f->rsp);
+  serial_write("\n");
+  serial_write("ss: ");
+  serial_write_hex(f->ss);
   serial_write("\n");
 
   ulong cr2;
@@ -126,6 +132,33 @@ void default_handler(interrupt_frame *frame) {
   }
 }
 
+void pagefault_handler(interrupt_frame *frame) {
+  serial_write_line("===== PAGE FAULT =====");
+  serial_write("Adress (CR2): ");
+  ulong cr2;
+  asm volatile("mov %%cr2, %0" : "=r"(cr2));
+  serial_write_hex(cr2);
+  serial_write_char('\n');
+  serial_write("Page present: ");
+  serial_write_line(frame->error_code & 1 ? "Yes" : "No");
+  serial_write("Write: ");
+  serial_write_line((frame->error_code >> 1) & 1 ? "Yes" : "No");
+  serial_write("User: ");
+  serial_write_line((frame->error_code >> 2) & 1 ? "Yes" : "No");
+  serial_write("Instruction fetch: ");
+  serial_write_line((frame->error_code >> 4) & 1 ? "Yes" : "No");
+
+  serial_write("RSP: ");
+  serial_write_hex(frame->rsp);
+  serial_write_char('\n');
+
+  dump_frame(frame);
+
+  for (;;) {
+    asm volatile("cli; hlt");
+  }
+}
+
 void breakpoint_handler(interrupt_frame *frame) {
   serial_write_line(g_exception_names[frame->vector]);
   dump_frame(frame);
@@ -133,5 +166,6 @@ void breakpoint_handler(interrupt_frame *frame) {
 
 void exceptions_init() {
   register_default_handler((interrupt_handler_t)default_handler);
-  register_interrupt_handler(3, (interrupt_handler_t)breakpoint_handler);
+  register_interrupt_handler(EX_BREAKPOINT, (interrupt_handler_t)breakpoint_handler);
+  register_interrupt_handler(EX_PAGE_FAULT, pagefault_handler);
 }
