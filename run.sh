@@ -83,6 +83,9 @@ qemu-system-x86_64 \
     -drive if=pflash,format=raw,file="$BUILD_DIR/OVMF_VARS.fd" \
     -drive format=raw,file="$ROOT_DIR/disk.bin" \
     -drive format=raw,file=fat:rw:"$ESP_DIR" \
+    -netdev user,id=net0 \
+    -device e1000,netdev=net0 \
+    -object filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap \
     -serial stdio \
     -d int,cpu_reset -D /tmp/qemu.log \
     $DEBUG_FLAGS

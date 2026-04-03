@@ -203,6 +203,26 @@ ulong vmm_setup_stack() {
   return KERNEL_STACK_TOP;
 }
 
+ulong vmm_virt_to_phys(address_space *space, ulong virt) {
+  ulong pml4_index = (virt >> 39) & 0x1FF;
+  ulong pdpt_index = (virt >> 30) & 0x1FF;
+  ulong pd_index   = (virt >> 21) & 0x1FF;
+  ulong pt_index   = (virt >> 12) & 0x1FF;
+  ulong offset     = virt & 0xFFF;
+
+  page_table *pml4 = space->pml4;
+  page_table *pdpt = get_table(pml4, pml4_index);
+  if (!pdpt) return 0;
+  page_table *pd = get_table(pdpt, pdpt_index);
+  if (!pd) return 0;
+  page_table *pt = get_table(pd, pd_index);
+  if (!pt) return 0;
+
+  ulong entry = pt->entries[pt_index];
+  if (!(entry & PAGE_PRESENT)) return 0;
+  return (entry & PAGE_ADDR_MASK) | offset;
+}
+
 void vmm_kernel_heap_alloc(ulong offset, ulong size) {
   ulong page_count = SIZE_TO_PAGE_COUNT(size);
   ulong phys_addr = pmm_alloc_pages(page_count);

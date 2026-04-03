@@ -8,14 +8,23 @@
 #include "graphics/console.h"
 #include "graphics/gfx.h"
 #include "io/ata.h"
+#include "io/e1000.h"
 #include "io/keyboard.h"
 #include "io/keys.h"
+#include "io/pci.h"
 #include "io/pic.h"
+#include "io/rtc.h"
 #include "io/serial.h"
+#include "io/time.h"
 #include "io/timer.h"
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
+#include "net/arp.h"
+#include "net/dhcp.h"
+#include "net/dns.h"
+#include "net/ethernet.h"
+#include "net/net.h"
 #include "scheduler/scheduler.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -165,7 +174,34 @@ void kernel_main() {
   serial_write_line("Tasks loaded!");
   // scheduler_add(user_task);
 
+  rtc_time t;
+  rtc_read(&t);
+  serial_printf("%04u-%02u-%02u %02u:%02u:%02u\n",
+                t.year, t.month, t.day, t.hour, t.minute, t.second);
+
+  pci_scan();
+
+  // e1000 is at bus=0, dev=3, func=0
+  pci_enable_bus_master(0, 3, 0);
+  ulong e1000_mmio = pci_get_bar0(0, 3, 0);
+  serial_write("e1000 MMIO base: ");
+  serial_write_hex(e1000_mmio);
+  serial_write_char('\n');
+  e1000_init(e1000_mmio);
+
+  // ubyte gatway_addr[4] = IP(10, 0, 2, 2);
+  // arp_send_ipv4(gatway_addr);
+  // serial_write_line("Sent ARP request");
+  // ubyte dns_addr[4] = IP(10, 0, 2, 3);
+  // arp_send_ipv4(dns_addr);
+  // serial_write_line("Sent ARP request");
+
+  dhcp_send_discovery();
+
+  dns_resolve("www.google.com");
+
   timer_init(47);
+  time_init();
   scheduler_run();
 
   serial_write("Goodbye from kernel!");

@@ -16,6 +16,9 @@ jump_to_userspace:
     push 0x202      ; rflags (IF=1)
     push 0x2B       ; cs  (user code 64 | RPL=3)
     push rdi        ; rip (entry point)
+
+    mov rdi, rdx
+    mov rsi, rcx
     iretq
 
 tss_load:

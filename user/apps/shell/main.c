@@ -1,4 +1,6 @@
-#include "../../lib/syscall.h"
+#include "syscall.h"
+#include "time.h"
+#include <stdio.h>
 
 #define bool _Bool
 #define true 1
@@ -156,6 +158,12 @@ static int parse_command(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH]) {
 
   return a;
 }
+static int parse_time() {
+  datetime dt = time_now();
+  printf("Current time is: %04u-%02u-%02u %02u:%02u:%02u\n", dt.year, dt.month,
+         dt.day, dt.hour, dt.min, dt.sec);
+}
+
 static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   sys_write("Shell run: ");
   sys_write(cmd);
@@ -173,6 +181,10 @@ static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   }
   if (strcmp(args[0], "cd") == 0) {
     cmd_cd(args, arg_count);
+    return;
+  }
+  if (strcmp(args[0], "time") == 0) {
+    parse_time();
     return;
   }
 
@@ -205,26 +217,41 @@ static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   sys_wait(pid);
 }
 
+static inline void print_welcome() {
+  out("\e[35mLeOS Shell\e[0m\n");
+
+  out("\e[45;31m");
+  out("    _      ____   _____ _    _ \n");
+  out("   | |    / __ \\ / ____| |  | |\n");
+  out("   | |   | |  | | (___ | |__| |\n");
+  out("   | |   | |  | |\\___ \\|  __  |\n");
+  out("   | |___| |__| |____) | |  | |\n");
+  out("   |______\\____/|_____/|_|  |_|\n");
+  out("\e[0m");
+
+  datetime dt = time_now();
+  printf("Current time is: %04u-%02u-%02u %02u:%02u:%02u\n", dt.year, dt.month,
+         dt.day, dt.hour, dt.min, dt.sec);
+}
+
+static inline void print_prompt() {
+
+  out(current_dir);
+  out("\e[34m>\e[0m");
+}
+
 int main(void) {
   sys_write("Hello from shell!\n");
-  out("LeOS Shell\n");
+  print_welcome();
 
   char buf[MAX_CMD];
-
   char args[MAX_ARGS][MAX_ARG_LENGTH];
-
   while (1) {
-    out(current_dir);
-    out("> ");
+    print_prompt();
 
     int len = 0;
     while (1) {
-      sys_write("Waiting...");
-      ulong rsp;
-      asm volatile("mov %%rsp, %0" : "=r"(rsp));
-      sys_write_hex(rsp);
       char c = in();
-      sys_write("KEY!\n");
 
       if (c == '\n' || c == '\r') {
         out("\n");

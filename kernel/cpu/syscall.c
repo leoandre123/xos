@@ -6,10 +6,12 @@
 #include "io/keyboard.h"
 #include "io/keys.h"
 #include "io/serial.h"
+#include "io/time.h"
 #include "ipc/pipe.h"
 #include "memory/vmm.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
+#include "syscalls.h"
 #include "types.h"
 
 // Framebuffer globals defined in kernel.c
@@ -227,6 +229,9 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   case SYS_YIELD:
     schedule();
     return 0;
+
+  case SYS_TIME:
+    return time_now();
 
   default:
     return (ulong)-1;

@@ -1,5 +1,2 @@
-CompileFlags:
-  Add: [-xc]
-
 Completion:
   HeaderInsertion: IWYU

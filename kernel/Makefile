@@ -4,6 +4,7 @@ AS = nasm
 OBJCOPY = objcopy
 
 CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic -m64 -mcmodel=kernel -O2 -Wall -Wextra \
+         -mno-sse -mno-mmx -mno-sse2 -mno-avx \
          -I. -I../shared
 LDFLAGS = -T linker.ld
 

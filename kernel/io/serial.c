@@ -1,4 +1,5 @@
 #include "serial.h"
+#include <stdarg.h>
 
 static inline void outb(ushort port, ubyte value) {
   __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
@@ -86,3 +87,80 @@ void serial_write_hex16(ushort value) { serial_write_hex_value(value, 2); }
 void serial_write_hex32(uint value) { serial_write_hex_value(value, 4); }
 void serial_write_hex(ulong value) { serial_write_hex_value(value, 8); }
 void serial_write_bin8(ubyte value) { serial_write_bin_value(value, 1); }
+
+void serial_printf(const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+
+  while (*fmt) {
+    if (*fmt != '%') {
+      serial_write_char(*fmt++);
+      continue;
+    }
+    fmt++; // skip '%'
+
+    // Optional zero-pad + width (e.g. %02x)
+    char pad = ' ';
+    int  width = 0;
+    if (*fmt == '0') { pad = '0'; fmt++; }
+    while (*fmt >= '0' && *fmt <= '9') {
+      width = width * 10 + (*fmt++ - '0');
+    }
+
+    switch (*fmt++) {
+      case 's': {
+        const char *s = va_arg(args, const char *);
+        if (!s) s = "(null)";
+        serial_write(s);
+        break;
+      }
+      case 'c':
+        serial_write_char((char)va_arg(args, int));
+        break;
+      case 'd': {
+        long v = va_arg(args, long);
+        if (v < 0) { serial_write_char('-'); v = -v; }
+        char buf[20]; int i = 0;
+        if (v == 0) buf[i++] = '0';
+        while (v > 0) { buf[i++] = '0' + (v % 10); v /= 10; }
+        while (i < width) buf[i++] = pad;
+        while (i--) serial_write_char(buf[i]);
+        break;
+      }
+      case 'u': {
+        ulong v = va_arg(args, ulong);
+        char buf[20]; int i = 0;
+        if (v == 0) buf[i++] = '0';
+        while (v > 0) { buf[i++] = '0' + (v % 10); v /= 10; }
+        while (i < width) buf[i++] = pad;
+        while (i--) serial_write_char(buf[i]);
+        break;
+      }
+      case 'x': {
+        static const char *hex = "0123456789abcdef";
+        ulong v = va_arg(args, ulong);
+        char buf[16]; int i = 0;
+        if (v == 0) buf[i++] = '0';
+        while (v > 0) { buf[i++] = hex[v & 0xF]; v >>= 4; }
+        while (i < width) buf[i++] = pad;
+        while (i--) serial_write_char(buf[i]);
+        break;
+      }
+      case 'X': {
+        static const char *hex = "0123456789ABCDEF";
+        ulong v = va_arg(args, ulong);
+        char buf[16]; int i = 0;
+        if (v == 0) buf[i++] = '0';
+        while (v > 0) { buf[i++] = hex[v & 0xF]; v >>= 4; }
+        while (i < width) buf[i++] = pad;
+        while (i--) serial_write_char(buf[i]);
+        break;
+      }
+      case '%':
+        serial_write_char('%');
+        break;
+    }
+  }
+
+  va_end(args);
+}

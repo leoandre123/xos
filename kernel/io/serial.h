@@ -11,3 +11,4 @@ void serial_write_hex16(ushort value);
 void serial_write_hex32(uint value);
 
 void serial_write_bin8(ubyte value);
+void serial_printf(const char *fmt, ...);

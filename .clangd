@@ -1,0 +1,26 @@
+---
+If:
+  PathMatch: kernel/.*
+CompileFlags:
+  Add:
+    - -xc
+    - -Ikernel
+    - -Ishared
+    - -ffreestanding
+    - -mno-sse
+    - -mno-sse2
+    - -mno-mmx
+    - -mno-avx
+    - -m64
+
+---
+If:
+  PathMatch: user/.*
+CompileFlags:
+  Add:
+    - -xc
+    - -Iuser/lib
+    - -Ishared
+    - -ffreestanding
+    - -nostdinc
+    - -m64

@@ -1,4 +1,5 @@
 #include "memutils.h"
+#include "types.h"
 
 void memset64(ulong *ptr, ulong value, ulong count) {
   for (ulong i = 0; i < count; i++) {
@@ -7,6 +8,12 @@ void memset64(ulong *ptr, ulong value, ulong count) {
 }
 
 void memset8(ubyte *ptr, ubyte value, ulong count) {
+  for (ulong i = 0; i < count; i++) {
+    ptr[i] = value;
+  }
+}
+
+void memset16(ushort *ptr, ushort value, ulong count) {
   for (ulong i = 0; i < count; i++) {
     ptr[i] = value;
   }

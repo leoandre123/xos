@@ -4,8 +4,7 @@
 -fno-stack-protector
 -fno-pic
 -m64
--mcmodel=kernel
 -Wall
 -Wextra
 -I.
--I../../lib
+-I../../shared

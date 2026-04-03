@@ -1,19 +1,19 @@
 #include "timer.h"
 #include "cpu/idt.h"
+#include "io/e1000.h"
 #include "io/io.h"
-#include "io/pic.h"
-#include "io/serial.h"
 #include "scheduler/scheduler.h"
 #include "types.h"
 #define PIT_COMMAND        0x43
 #define PIT_CHANNEL0       0x40
 #define PIT_BASE_FREQUENCY 1193182
 
-int g_timer_ticks = 0;
+int  g_timer_ticks     = 0;
+uint g_timer_frequency = 0;
 
 void timer_handler() {
   g_timer_ticks++;
-  // serial_write("-t-");
+  e1000_poll();
   schedule();
 }
 
@@ -21,6 +21,7 @@ void timer_init(uint frequency) {
   if (frequency == 0) {
     frequency = 100;
   }
+  g_timer_frequency = frequency;
 
   ushort divisor = (ushort)(PIT_BASE_FREQUENCY / frequency);
 

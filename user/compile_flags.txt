@@ -1,0 +1,11 @@
+-xc
+-std=gnu11
+-ffreestanding
+-fno-stack-protector
+-fno-pic
+-m64
+-Wall
+-Wextra
+-Ilib
+-I../shared
+-I/usr/lib/gcc/x86_64-linux-gnu/13/include

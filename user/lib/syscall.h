@@ -1,23 +1,9 @@
 #pragma once
+#include "syscalls.h"
 
 typedef unsigned long ulong;
 typedef unsigned int uint;
 typedef unsigned char ubyte;
-
-#define SYS_WRITE 0
-#define SYS_EXIT 1
-#define SYS_WRITE_CONSOLE 2
-#define SYS_READ_KEY 3
-#define SYS_EXEC 4
-#define SYS_WAIT 5
-#define SYS_PIPE 6
-#define SYS_READ_FD 7
-#define SYS_WRITE_FD 8
-#define SYS_MAP_FB 9
-#define SYS_PIPE_AVAIL 10
-#define SYS_READ_KEY_NB 11
-#define SYS_YIELD 12
-#define SYS_WRITE_HEX 20
 
 static inline ulong syscall(ulong num, ulong a1, ulong a2, ulong a3) {
   ulong ret;
@@ -69,3 +55,4 @@ static inline ulong sys_read_key_nb(void) {
   return syscall(SYS_READ_KEY_NB, 0, 0, 0);
 }
 static inline void sys_yield(void) { syscall(SYS_YIELD, 0, 0, 0); }
+static inline ulong sys_time(void) { return syscall(SYS_TIME, 0, 0, 0); }

@@ -11,8 +11,13 @@ CC      = gcc
 LD      = ld
 AS      = nasm
 
+GCC_BUILTIN_INCLUDES := $(shell $(CC) -print-file-name=include)
+
 CFLAGS  = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -m64 -O2 \
-          -nostdlib -nostdinc -I$(USER_ROOT)/lib
+          -nostdlib -nostdinc \
+          -I$(USER_ROOT)/lib \
+          -I$(USER_ROOT)/../shared \
+          -I$(GCC_BUILTIN_INCLUDES)
 ASFLAGS = -f elf64
 LDFLAGS = -T $(USER_ROOT)/linker.ld -nostdlib
 
@@ -27,9 +32,13 @@ CRT0 = $(BUILD)/crt0.o
 C_SRCS   := $(shell find . -name '*.c')
 ASM_SRCS := $(shell find . -name '*.asm')
 
+# lib sources excluding crt0 (compiled separately)
+LIB_SRCS := $(filter-out $(USER_ROOT)/lib/crt0.c, $(wildcard $(USER_ROOT)/lib/*.c))
+LIB_OBJS := $(patsubst $(USER_ROOT)/lib/%.c, $(BUILD)/lib/%.o, $(LIB_SRCS))
+
 C_OBJS   := $(patsubst ./%.c,  $(BUILD)/%.o, $(C_SRCS))
 ASM_OBJS := $(patsubst ./%.asm,$(BUILD)/%.o, $(ASM_SRCS))
-OBJS     := $(C_OBJS) $(ASM_OBJS)
+OBJS     := $(C_OBJS) $(ASM_OBJS) $(LIB_OBJS)
 
 all: $(ELF)
 
@@ -40,6 +49,10 @@ $(ELF): $(CRT0) $(OBJS)
 
 $(CRT0): $(USER_ROOT)/lib/crt0.c
 	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/lib/%.o: $(USER_ROOT)/lib/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: %.c
