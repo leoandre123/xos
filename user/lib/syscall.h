@@ -1,9 +1,6 @@
 #pragma once
 #include "syscalls.h"
-
-typedef unsigned long ulong;
-typedef unsigned int uint;
-typedef unsigned char ubyte;
+#include "types.h"
 
 static inline ulong syscall(ulong num, ulong a1, ulong a2, ulong a3) {
   ulong ret;

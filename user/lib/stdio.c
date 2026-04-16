@@ -2,31 +2,45 @@
 #include "syscall.h"
 #include <stdarg.h>
 
-// Single character output buffer flushed via sys_print
-static char g_buf[1024];
-static int g_pos = 0;
+// ---------------------------------------------------------------------------
+// Generic write context: either a growable fd-backed buffer or a fixed string
+// ---------------------------------------------------------------------------
 
-static void buf_flush(void) {
-  if (g_pos == 0)
+typedef struct {
+  char *str;   // non-null → sprintf mode, write here
+  int   pos;   // current write position
+  int   limit; // max chars (including null terminator) in sprintf mode
+  // fd-backed mode
+  char  fb[1024];
+  int   fb_pos;
+} out_ctx;
+
+static void ctx_flush(out_ctx *ctx) {
+  if (ctx->fb_pos == 0)
     return;
-  g_buf[g_pos] = '\0';
-  sys_write_fd(1, g_buf, g_pos);
-  g_pos = 0;
+  ctx->fb[ctx->fb_pos] = '\0';
+  sys_write_fd(1, ctx->fb, ctx->fb_pos);
+  ctx->fb_pos = 0;
 }
 
-static void buf_putchar(char c) {
-  g_buf[g_pos++] = c;
-  if (g_pos >= 1023 || c == '\n')
-    buf_flush();
+static void ctx_putchar(out_ctx *ctx, char c) {
+  if (ctx->str) {
+    if (ctx->pos < ctx->limit - 1)
+      ctx->str[ctx->pos++] = c;
+  } else {
+    ctx->fb[ctx->fb_pos++] = c;
+    if (ctx->fb_pos >= 1023 || c == '\n')
+      ctx_flush(ctx);
+  }
 }
 
-static void buf_puts(const char *s) {
+static void ctx_puts(out_ctx *ctx, const char *s) {
   while (*s)
-    buf_putchar(*s++);
+    ctx_putchar(ctx, *s++);
 }
 
-static void buf_putulong(unsigned long v, int base, int uppercase, int width,
-                         char pad) {
+static void ctx_putulong(out_ctx *ctx, unsigned long v, int base, int uppercase,
+                         int width, char pad) {
   const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
   char tmp[20];
   int i = 0;
@@ -39,35 +53,21 @@ static void buf_putulong(unsigned long v, int base, int uppercase, int width,
   while (i < width)
     tmp[i++] = pad;
   while (i--)
-    buf_putchar(tmp[i]);
+    ctx_putchar(ctx, tmp[i]);
 }
 
-static void buf_putlong(long v, int width, char pad) {
+static void ctx_putlong(out_ctx *ctx, long v, int width, char pad) {
   if (v < 0) {
-    buf_putchar('-');
+    ctx_putchar(ctx, '-');
     v = -v;
   }
-  buf_putulong((unsigned long)v, 10, 0, width, pad);
+  ctx_putulong(ctx, (unsigned long)v, 10, 0, width, pad);
 }
 
-void putchar(char c) {
-  buf_putchar(c);
-  buf_flush();
-}
-
-void puts(const char *s) {
-  buf_puts(s);
-  buf_putchar('\n');
-  buf_flush();
-}
-
-void printf(const char *fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-
+static void do_fmt(out_ctx *ctx, const char *fmt, va_list args) {
   while (*fmt) {
     if (*fmt != '%') {
-      buf_putchar(*fmt++);
+      ctx_putchar(ctx, *fmt++);
       continue;
     }
     fmt++; // skip '%'
@@ -78,37 +78,79 @@ void printf(const char *fmt, ...) {
       pad = '0';
       fmt++;
     }
-    while (*fmt >= '0' && *fmt <= '9') {
+    while (*fmt >= '0' && *fmt <= '9')
       width = width * 10 + (*fmt++ - '0');
-    }
 
     switch (*fmt++) {
     case 's': {
       const char *s = va_arg(args, const char *);
-      buf_puts(s ? s : "(null)");
+      ctx_puts(ctx, s ? s : "(null)");
       break;
     }
     case 'c':
-      buf_putchar((char)va_arg(args, int));
+      ctx_putchar(ctx, (char)va_arg(args, int));
       break;
     case 'd':
-      buf_putlong(va_arg(args, long), width, pad);
+      ctx_putlong(ctx, va_arg(args, long), width, pad);
       break;
     case 'u':
-      buf_putulong(va_arg(args, unsigned long), 10, 0, width, pad);
+      ctx_putulong(ctx, va_arg(args, unsigned long), 10, 0, width, pad);
       break;
     case 'x':
-      buf_putulong(va_arg(args, unsigned long), 16, 0, width, pad);
+      ctx_putulong(ctx, va_arg(args, unsigned long), 16, 0, width, pad);
       break;
     case 'X':
-      buf_putulong(va_arg(args, unsigned long), 16, 1, width, pad);
+      ctx_putulong(ctx, va_arg(args, unsigned long), 16, 1, width, pad);
       break;
     case '%':
-      buf_putchar('%');
+      ctx_putchar(ctx, '%');
       break;
     }
   }
+}
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+void putchar(char c) {
+  out_ctx ctx = {0};
+  ctx_putchar(&ctx, c);
+  ctx_flush(&ctx);
+}
+
+void puts(const char *s) {
+  out_ctx ctx = {0};
+  ctx_puts(&ctx, s);
+  ctx_putchar(&ctx, '\n');
+  ctx_flush(&ctx);
+}
+
+void printf(const char *fmt, ...) {
+  out_ctx ctx = {0};
+  va_list args;
+  va_start(args, fmt);
+  do_fmt(&ctx, fmt, args);
   va_end(args);
-  buf_flush();
+  ctx_flush(&ctx);
+}
+
+int snprintf(char *buf, int size, const char *fmt, ...) {
+  out_ctx ctx = {.str = buf, .limit = size};
+  va_list args;
+  va_start(args, fmt);
+  do_fmt(&ctx, fmt, args);
+  va_end(args);
+  buf[ctx.pos] = '\0';
+  return ctx.pos;
+}
+
+int sprintf(char *buf, const char *fmt, ...) {
+  out_ctx ctx = {.str = buf, .limit = 0x7fffffff};
+  va_list args;
+  va_start(args, fmt);
+  do_fmt(&ctx, fmt, args);
+  va_end(args);
+  buf[ctx.pos] = '\0';
+  return ctx.pos;
 }

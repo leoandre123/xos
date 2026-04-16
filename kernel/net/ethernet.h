@@ -1,12 +1,13 @@
 #pragma once
+#include "net_types.h"
 #include "types.h"
 
 #define ETHERTYPE_ARP  0x0806
 #define ETHERTYPE_IPV4 0x0800
 
 typedef struct {
-  ubyte  dst[6];
-  ubyte  src[6];
+  mac_addr dst;
+  mac_addr src;
   ushort ethertype; // big-endian
 } __attribute__((packed)) ethernet_frame;
 
@@ -14,4 +15,4 @@ typedef struct {
 void ethernet_receive(ubyte *data, ushort len);
 
 // Send an ethernet frame — fills src MAC automatically
-void ethernet_send(ubyte dst[6], ushort ethertype, void *payload, ushort payload_len);
+void ethernet_send(mac_addr dst, ushort ethertype, void *payload, ushort payload_len);

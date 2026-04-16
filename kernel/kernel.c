@@ -20,11 +20,11 @@
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
-#include "net/arp.h"
 #include "net/dhcp.h"
 #include "net/dns.h"
-#include "net/ethernet.h"
-#include "net/net.h"
+#include "net/http.h"
+#include "net/icmp.h"
+#include "panic.h"
 #include "scheduler/scheduler.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -35,35 +35,6 @@ uint g_fb_pitch;
 ulong g_fb_phys;
 
 extern void enter_kernel_main(ulong stack_addr);
-
-void panic(const char *msg) {
-  serial_write("KERNEL PANIC: ");
-  serial_write(msg);
-
-  // Stop everything
-  __asm__ volatile("cli");
-  for (;;) {
-    __asm__ volatile("hlt");
-  }
-}
-
-void panic_assert(const char *file, int line, const char *expr) {
-
-  console_write("ASSERT FAILED: ");
-  console_write_line(expr);
-
-  console_write("FILE: ");
-  console_write_line(file);
-
-  console_write("LINE: ");
-  console_write_u32(line);
-  console_write("\n");
-
-  __asm__ volatile("cli");
-  for (;;) {
-    __asm__ volatile("hlt");
-  }
-}
 
 void kernel_pre_main(BootInfo *boot_info) {
   serial_init();
@@ -85,20 +56,9 @@ void kernel_pre_main(BootInfo *boot_info) {
     asm volatile("hlt");
 }
 
-// FE
-
-// DM
-// DAFNE
 void kernel_main() {
   serial_write_line("LeOS!");
   serial_write_line("Hello from kernel!");
-
-  ulong rsp;
-  asm volatile("mov %%rsp, %0" : "=r"(rsp));
-
-  serial_write("RSP: ");
-  serial_write_hex(rsp);
-  serial_write_char('\n');
 
   heap_init();
 
@@ -125,30 +85,6 @@ void kernel_main() {
 
   fat32_print_root();
 
-  fat32_file *f0 = fat32_open("/a_very_long_filename_is_here_right_here.txt");
-  fat32_file *f1 = fat32_open("/hello.txt");
-  fat32_file *f2 = fat32_open("/a.b.txt");
-  serial_write("BEFORE PF");
-  fat32_file *f3 = fat32_open("/subfolder/hello.txt");
-  serial_write("AFTER PF");
-  ubyte *file_buf0 = kmalloc(f0->size);
-  ubyte *file_buf1 = kmalloc(f1->size);
-  ubyte *file_buf2 = kmalloc(f2->size);
-  ubyte *file_buf3 = kmalloc(f3->size);
-  fat32_read(f0, file_buf0, f0->size);
-  fat32_read(f1, file_buf1, f1->size);
-  fat32_read(f2, file_buf2, f2->size);
-  fat32_read(f3, file_buf3, f3->size);
-
-  serial_write(file_buf0);
-  serial_write(file_buf1);
-  serial_write(file_buf2);
-  serial_write(file_buf3);
-
-  // fat32_file files[] = fat32_get_files();
-
-  //
-
   serial_write("ENABLING STI...");
   asm volatile("sti");
   // asm volatile("cli");
@@ -161,12 +97,25 @@ void kernel_main() {
   scheduler_init();
   serial_write_line("Scheduler initilized!");
 
-  fat32_file *term_file = fat32_open("/terminal.elf");
+  // Read /init to pick the first process ("d" → dafne, else terminal)
+  const char *init_elf = "/terminal.elf";
+  const char *init_name = "terminal";
+  fat32_file *init_cfg = fat32_open("/init");
+  if (init_cfg && init_cfg->size > 0) {
+    char first = 0;
+    fat32_read(init_cfg, &first, 1);
+    if (first == 'd') {
+      init_elf = "/dafne.elf";
+      init_name = "dafne";
+    }
+  }
+
+  fat32_file *term_file = fat32_open(init_elf);
   if (!term_file)
-    panic("Cannot find /terminal.elf on disk");
-  task *term_task = elf_load(term_file, "terminal", "/");
+    panic("Cannot find init ELF on disk");
+  task *term_task = elf_load(term_file, init_name, "/");
   if (!term_task)
-    panic("Failed to load terminal ELF");
+    panic("Failed to load init ELF");
   serial_write_hex((ulong)term_task);
   serial_write_line("Tasks created!");
   scheduler_add(term_task);
@@ -189,18 +138,21 @@ void kernel_main() {
   serial_write_char('\n');
   e1000_init(e1000_mmio);
 
-  // ubyte gatway_addr[4] = IP(10, 0, 2, 2);
-  // arp_send_ipv4(gatway_addr);
-  // serial_write_line("Sent ARP request");
-  // ubyte dns_addr[4] = IP(10, 0, 2, 3);
-  // arp_send_ipv4(dns_addr);
-  // serial_write_line("Sent ARP request");
-
   dhcp_send_discovery();
+
+  serial_write("Sleep...");
+  timer_init(47);
+
+  ksleep_ms(4000);
+  serial_write_line("Done!");
 
   dns_resolve("www.google.com");
 
-  timer_init(47);
+  icmp_send_ping(IP(10, 0, 2, 2));
+  icmp_send_ping(IP(8, 8, 8, 8));
+
+  http_test();
+
   time_init();
   scheduler_run();
 

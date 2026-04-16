@@ -69,13 +69,26 @@ ls -l "$KERNEL_DIR/build/kernel.bin"
 echo "--- ESP contents ---"
 find "$ESP_DIR" -maxdepth 4 -type f | sort
 
-echo "==== Starting QEMU ===="
+echo "==== Writing /init ===="
 
+INIT_MODE="terminal"
 DEBUG_FLAGS=""
-if [ "${1}" = "--debug" ] || [ "${1}" = "-d" ]; then
-    DEBUG_FLAGS="-s -S"
+for arg in "$@"; do
+    case "$arg" in
+        --desktop)  INIT_MODE="dafne" ;;
+        --terminal) INIT_MODE="terminal" ;;
+        --debug|-d) DEBUG_FLAGS="-s -S" ;;
+    esac
+done
+
+echo "  Init mode: $INIT_MODE"
+echo -n "$INIT_MODE" | mcopy -D o -i "$ROOT_DIR/disk.bin" - "::init"
+
+if [ -n "$DEBUG_FLAGS" ]; then
     echo "Debug mode: waiting for GDB on port 1234"
 fi
+
+echo "==== Starting QEMU ===="
 
 qemu-system-x86_64 \
     -m 256M \

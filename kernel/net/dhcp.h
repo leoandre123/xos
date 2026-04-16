@@ -1,7 +1,8 @@
 #pragma once
-
 #include "net/net.h"
+#include "net_types.h"
 #include "types.h"
+
 typedef struct {
   ubyte op;
   ubyte htype;
@@ -19,6 +20,8 @@ typedef struct {
   uint magic_cookie;
   ubyte options[64];
 } __attribute__((__packed__)) dhcp_packet;
+
+extern ipv4_addr g_ip;
 
 void dhcp_send_discovery();
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "net/net.h"
+#include "net_types.h"
 #include "types.h"
 
 #define ARP_REQUEST 1
@@ -13,10 +14,10 @@ typedef struct {
   ubyte hardware_length;
   ubyte protocol_length;
   ushort op_code;
-  ubyte sender_mac_address[6];
-  ubyte sender_ip_address[4];
-  ubyte target_mac_address[6];
-  ubyte target_ip_address[4];
+  mac_addr sender_mac_address;
+  ipv4_addr sender_ip_address;
+  mac_addr target_mac_address;
+  ipv4_addr target_ip_address;
 } __attribute__((__packed__)) arp_packet_ipv4;
 
 typedef struct {
@@ -25,7 +26,7 @@ typedef struct {
 } arp_entry;
 
 void arp_receive(ubyte *data, ushort len);
-void arp_send_ipv4(ubyte addr[4]);
+void arp_send_ipv4(ipv4_addr addr);
 
 void arp_table_add(ipv4_addr ip, mac_addr mac);
-int arp_table_lookup(ipv4_addr ip, mac_addr mac_out);
+int arp_table_lookup(ipv4_addr ip, mac_addr *mac_out);

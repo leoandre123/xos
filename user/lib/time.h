@@ -14,8 +14,7 @@ static inline int is_leap_year(uint y) {
   return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
 }
 
-static inline datetime time_now(void) {
-  ulong ts = sys_time();
+static inline datetime to_datetime(ulong ts) {
   datetime dt;
 
   dt.sec = ts % 60;
@@ -48,4 +47,9 @@ static inline datetime time_now(void) {
   dt.day = ts + 1;
 
   return dt;
+}
+
+static inline datetime time_now(void) {
+  ulong ts = sys_time();
+  return to_datetime(ts);
 }

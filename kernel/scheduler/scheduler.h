@@ -5,6 +5,8 @@
 #define USER_STACK_TOP   0x0000800000000000ULL // top of user virtual address space
 #define USER_STACK_PAGES 4
 
+extern int g_scheduler_running;
+
 void scheduler_init();
 void scheduler_add(task *task);
 task *scheduler_current(void);

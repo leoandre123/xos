@@ -16,3 +16,14 @@
 #define SYS_YIELD         12 // yield CPU to scheduler
 #define SYS_WRITE_HEX     20
 #define SYS_TIME          40
+/* PROCESSES 60-79 */
+
+/* FILES 80-99*/
+
+/* NETWORKING 100-119 */
+#define SYS_SOCKET_CONNECT 100
+#define SYS_SOCKET_LISTEN  101
+#define SYS_SOCKET_ACCEPT  102
+#define SYS_SOCKET_SEND    103
+#define SYS_SOCKET_RECEIVE 104
+#define SYS_SOCKET_CLOSE   105

@@ -1,5 +1,5 @@
-#include "../../lib/gfx.h"
-#include "../../lib/syscall.h"
+#include "gfx.h"
+#include "syscall.h"
 
 #define MAX_ANSI_ARGUMENTS 16
 

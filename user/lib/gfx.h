@@ -3,10 +3,10 @@
 #include "syscall.h"
 
 typedef struct {
-  unsigned int *ptr;   // mapped framebuffer base
+  unsigned int *ptr; // mapped framebuffer base
   unsigned int width;
   unsigned int height;
-  unsigned int pitch;  // bytes per scanline
+  unsigned int pitch; // bytes per scanline
 } fb_info;
 
 static inline void gfx_map(fb_info *fb) {
@@ -14,7 +14,7 @@ static inline void gfx_map(fb_info *fb) {
 }
 
 static inline void gfx_pixel(fb_info *fb, unsigned int x, unsigned int y,
-                              unsigned int color) {
+                             unsigned int color) {
   if (x >= fb->width || y >= fb->height)
     return;
   fb->ptr[y * (fb->pitch / 4) + x] = color;
@@ -28,15 +28,15 @@ static inline void gfx_fill(fb_info *fb, unsigned int color) {
 }
 
 static inline void gfx_rect(fb_info *fb, unsigned int x, unsigned int y,
-                             unsigned int w, unsigned int h,
-                             unsigned int color) {
+                            unsigned int w, unsigned int h,
+                            unsigned int color) {
   for (unsigned int dy = 0; dy < h; dy++)
     for (unsigned int dx = 0; dx < w; dx++)
       gfx_pixel(fb, x + dx, y + dy, color);
 }
 
 static inline void gfx_putc(fb_info *fb, unsigned int px, unsigned int py,
-                             char c, unsigned int fg, unsigned int bg) {
+                            char c, unsigned int fg, unsigned int bg) {
   int idx = c - FONT_FIRST_CHAR;
   if (idx < 0 || idx >= FONT_GLYPH_COUNT)
     idx = 0;
@@ -47,4 +47,10 @@ static inline void gfx_putc(fb_info *fb, unsigned int px, unsigned int py,
       gfx_pixel(fb, px + col, py + row, color);
     }
   }
+}
+
+static inline void gfx_str(fb_info *fb, unsigned int x, unsigned int y,
+                           const char *s, unsigned int fg, unsigned int bg) {
+  for (; *s; s++, x += FONT_GLYPH_WIDTH)
+    gfx_putc(fb, x, y, *s, fg, bg);
 }

@@ -9,6 +9,8 @@
 #include "io/time.h"
 #include "ipc/pipe.h"
 #include "memory/vmm.h"
+#include "net/socket.h"
+#include "net_types.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 #include "syscalls.h"
@@ -232,6 +234,20 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
 
   case SYS_TIME:
     return time_now();
+
+  case SYS_SOCKET_CONNECT:
+    return socket_tcp_client((ipv4_addr)(uint)arg1, (arg2), 0).value;
+  case SYS_SOCKET_LISTEN:
+    return socket_tcp_server(arg1).value;
+  case SYS_SOCKET_ACCEPT:
+    return socket_accept((socket_handle)(uint)arg1).value;
+  case SYS_SOCKET_RECEIVE:
+    return socket_recv((socket_handle)(uint)arg1, (void *)arg2, arg3);
+  case SYS_SOCKET_SEND:
+    return socket_send((socket_handle)(uint)arg1, (void *)arg2, arg3);
+  case SYS_SOCKET_CLOSE:
+    socket_close((socket_handle)(uint)arg1);
+    return 0;
 
   default:
     return (ulong)-1;

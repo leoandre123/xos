@@ -12,6 +12,8 @@
 
 extern void context_switch(ulong *old_rsp, ulong new_rsp);
 
+int g_scheduler_running = 0;
+
 static task *g_current = 0;
 static task *g_task_list = 0;
 static task *g_idle = 0;
@@ -113,6 +115,8 @@ static inline task *task_create(void (*entry)(void *), void *args, const char *n
 }
 
 void schedule() {
+  if (!g_scheduler_running)
+    return;
   task *next = scheduler_pick_next();
   task *prev = g_current;
   if (!next || next == prev)
@@ -167,6 +171,7 @@ void scheduler_add(task *task) {
   g_task_list->next = task;
 }
 __attribute__((noreturn)) void scheduler_run() {
+  g_scheduler_running = 1;
   schedule();
   panic("schedule_run has returned");
 }

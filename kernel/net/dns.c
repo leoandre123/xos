@@ -2,10 +2,12 @@
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "net/net.h"
+#include "net/socket.h"
 #include "net/udp.h"
+#include "net_types.h"
 #include "types.h"
 
-static ipv4_addr g_dns_server_addr = IP(10, 0, 2, 3);
+static ipv4_addr g_dns_server_addr = (ipv4_addr)0x0302000Au;
 
 void dns_resolve(const char *host) {
   dns_header header = {0};
@@ -43,9 +45,11 @@ void dns_resolve(const char *host) {
   memset16((ushort *)(((ubyte *)payload) + offset), htons(1), 1);
   offset += 2;
 
-  udp_send(g_dns_server_addr, 1024, 53, payload, total_size);
+  socket_handle handle = socket_udp(g_dns_server_addr, 53, 1024);
+  socket_send(handle, payload, total_size);
+  socket_close(handle);
   kfree(payload);
 }
 void dns_set_server_ip(ipv4_addr ip) {
-  memcpy8(g_dns_server_addr, ip, 4);
+  g_dns_server_addr = ip;
 }

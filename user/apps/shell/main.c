@@ -131,6 +131,13 @@ static void cmd_cd(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   }
 }
 
+static void cmd_time() {
+  datetime dt = time_now();
+  printf("Current time is: %04u-%02u-%02u %02u:%02u:%02u\n", dt.year, dt.month,
+         dt.day, dt.hour, dt.min, dt.sec);
+}
+static void cmd_help() { printf("I dont know how to help you\n"); }
+
 static int parse_command(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH]) {
   int ci = 0;
   int a = 0;
@@ -158,24 +165,17 @@ static int parse_command(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH]) {
 
   return a;
 }
-static int parse_time() {
-  datetime dt = time_now();
-  printf("Current time is: %04u-%02u-%02u %02u:%02u:%02u\n", dt.year, dt.month,
-         dt.day, dt.hour, dt.min, dt.sec);
-}
 
-static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
-  sys_write("Shell run: ");
-  sys_write(cmd);
-  sys_write("\n");
+static void run(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
+  sys_write("Shell run: \n");
   for (int i = 0; i < arg_count; i++) {
     sys_write(args[i]);
     sys_write("\n");
   }
-  if (cmd[0] == '\0')
+  if (args[0][0] == '\0')
     return;
 
-  if (strcmp(cmd, "exit") == 0) {
+  if (strcmp(args[0], "exit") == 0) {
     out("Bye!\n");
     sys_exit();
   }
@@ -184,16 +184,20 @@ static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
     return;
   }
   if (strcmp(args[0], "time") == 0) {
-    parse_time();
+    cmd_time();
+    return;
+  }
+  if (strcmp(args[0], "help") == 0) {
+    cmd_help();
     return;
   }
 
   char path[MAX_CMD + 2];
   int i = 0;
-  if (cmd[0] != '/')
+  if (args[0][0] != '/')
     path[i++] = '/';
-  for (int j = 0; cmd[j]; j++)
-    path[i++] = cmd[j];
+  for (int j = 0; args[0][j]; j++)
+    path[i++] = args[0][j];
   path[i] = '\0';
 
   // Child inherits shell's stdin (fd 0) and stdout (fd 1).
@@ -210,7 +214,7 @@ static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   }
   if (pid < 0) {
     out("Unknown command: ");
-    out(cmd);
+    out(args[0]);
     out("\n");
     return;
   }
@@ -273,6 +277,6 @@ int main(void) {
     buf[len] = '\0';
 
     int arg_count = parse_command(buf, args);
-    run(buf, args, arg_count);
+    run(args, arg_count);
   }
 }
