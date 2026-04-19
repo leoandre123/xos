@@ -1,6 +1,8 @@
 #include "exceptions.h"
 #include "idt.h"
 #include "io/serial.h"
+#include "panic.h"
+
 static const char *g_exception_names[32] = {
     "Divide Error",                   // 0
     "Debug",                          // 1
@@ -153,6 +155,8 @@ void pagefault_handler(interrupt_frame *frame) {
   serial_write_char('\n');
 
   dump_frame(frame);
+
+  panic("PAGE FAULT");
 
   for (;;) {
     asm volatile("cli; hlt");

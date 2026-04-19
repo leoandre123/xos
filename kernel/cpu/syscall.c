@@ -1,16 +1,21 @@
 #include "syscall.h"
+#include "compositor/compositor.h"
+#include "fb_info.h"
 #include "filesystem/elf.h"
-#include "filesystem/fat32.h"
+#include "filesystem/file.h"
 #include "gdt.h"
 #include "graphics/console.h"
 #include "io/keyboard.h"
 #include "io/keys.h"
+#include "io/mouse.h"
 #include "io/serial.h"
 #include "io/time.h"
 #include "ipc/pipe.h"
+#include "memory/pmm.h"
 #include "memory/vmm.h"
 #include "net/socket.h"
 #include "net_types.h"
+#include "panic.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 #include "syscalls.h"
@@ -26,12 +31,12 @@ extern ulong g_fb_phys;
 #define USER_FB_VADDR 0x0000600000000000ULL
 
 // Layout of the fb_info struct in userspace (must match user/lib/gfx.h)
-typedef struct {
-  ulong ptr; // user virtual address of framebuffer
-  uint width;
-  uint height;
-  uint pitch; // bytes per scanline
-} kernel_fb_info;
+// typedef struct {
+//  ulong ptr; // user virtual address of framebuffer
+//  uint width;
+//  uint height;
+//  uint pitch; // bytes per scanline
+//} kernel_fb_info;
 
 static int handle_alloc(task *t, handle_type type, void *ptr) {
   for (int i = 0; i < MAX_HANDLES; i++) {
@@ -131,12 +136,17 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   }
 
   case SYS_EXEC: {
-    fat32_file *f = fat32_open((const char *)arg1);
+    file_handle handle = file_open((const char *)arg1);
+
+    if (!handle)
+      return -1;
+
     task *parent = scheduler_current();
 
-    if (!f)
-      return (ulong)-1;
-    task *t = elf_load(f, "", parent->working_directory);
+    task *t = elf_load(handle, "", parent->working_directory);
+
+    file_close(handle);
+
     if (!t)
       return (ulong)-1;
     // Inherit stdin/stdout handles if provided (arg2=stdin_fd, arg3=stdout_fd)
@@ -152,6 +162,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
         t->handles[1] = *h;
     }
     scheduler_add(t);
+
     return (ulong)t->pid;
   }
 
@@ -205,8 +216,8 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     ulong fb_size = (ulong)g_fb_height * g_fb_pitch;
     vmm_map_bytes(t->address_space, USER_FB_VADDR, g_fb_phys, fb_size,
                   PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
-    kernel_fb_info *info = (kernel_fb_info *)arg1;
-    info->ptr = USER_FB_VADDR;
+    fb_info *info = (fb_info *)arg1;
+    info->ptr = (uint *)USER_FB_VADDR;
     info->width = g_fb_width;
     info->height = g_fb_height;
     info->pitch = g_fb_pitch;
@@ -228,12 +239,45 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
   }
 
+  case SYS_READ_MOUSE: {
+    mouse_state ms = mouse_read_state();
+    if (!ms.pending)
+      return 0;
+    return ((ulong)1 << 48) | ((ulong)ms.buttons << 32) |
+           ((ulong)(ushort)ms.y << 16) | (ushort)ms.x;
+  }
+
+  case SYS_ALLOC: {
+    task *t = scheduler_current();
+    ulong size = arg1;
+    if (size == 0)
+      return 0;
+    ulong pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    ulong phys = pmm_alloc_pages(pages);
+    if (!phys)
+      return 0;
+    ulong vaddr = t->heap_next;
+    vmm_map_pages(t->address_space, vaddr, phys, pages,
+                  PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+    t->heap_next += pages * PAGE_SIZE;
+    return vaddr;
+  }
+
   case SYS_YIELD:
     schedule();
     return 0;
 
   case SYS_TIME:
     return time_now();
+
+  case SYS_FILE_OPEN:
+    panic("Not implemented");
+    return 0;
+  case SYS_FILE_CLOSE:
+    panic("Not implemented");
+    return 0;
+  case SYS_FILE_READDIR:
+    return file_readdir((const char *)arg1, (file_dirent *)arg2, arg3);
 
   case SYS_SOCKET_CONNECT:
     return socket_tcp_client((ipv4_addr)(uint)arg1, (arg2), 0).value;
@@ -248,6 +292,48 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   case SYS_SOCKET_CLOSE:
     socket_close((socket_handle)(uint)arg1);
     return 0;
+
+  case SYS_COMPOSITOR_REGISTER: {
+    task *t = scheduler_current();
+    return (ulong)compositor_register(t);
+  }
+
+  case SYS_COMPOSITOR_POLL: {
+    // arg1 = pointer to compositor_event in user space
+    return (ulong)compositor_poll((compositor_event *)arg1);
+  }
+
+  case SYS_WINDOW_CREATE: {
+    // arg1=window_create_options*; returns window_handle or 0
+    typedef struct {
+      ushort width;
+      ushort height;
+      const char *title;
+    } wc_opts;
+    wc_opts *opts = (wc_opts *)arg1;
+    task *t = scheduler_current();
+    window_handle handle = 0;
+    ulong vaddr = compositor_window_create(t, opts->width, opts->height,
+                                           opts->title, &handle);
+    if (!vaddr)
+      return (ulong)-1;
+    return handle;
+  }
+
+  case SYS_WINDOW_PRESENT:
+    compositor_present_window((window_handle)arg1);
+    return 0;
+
+  case SYS_WINDOW_POST_EVENT:
+    return (ulong)compositor_post_event((window_handle)arg1, (window_event *)arg2);
+
+  case SYS_WINDOW_POLL:
+    return (ulong)compositor_window_poll_event((window_handle)arg1, (window_event *)arg2);
+
+  case SYS_WINDOW_FRAMEBUFFER: {
+    compositor_get_framebuffer(arg1, (fb_info *)arg2);
+    return 0;
+  }
 
   default:
     return (ulong)-1;

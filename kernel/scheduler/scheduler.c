@@ -194,6 +194,8 @@ task *task_create_user(void (*entry)(void *), void *args, const char *name) {
   ulong *sp = t->rsp;
   sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
 
+  t->heap_next = USER_HEAP_BASE;
+
   return t;
 }
 task *task_create_user_from_space(address_space *space, void *entry, const char *name, const char *wd) {
@@ -208,6 +210,8 @@ task *task_create_user_from_space(address_space *space, void *entry, const char 
   t->user_rsp = (void *)USER_STACK_TOP - 8; // where rsp points when entering ring 3
   ulong *sp = t->rsp;
   sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
+
+  t->heap_next = USER_HEAP_BASE;
 
   int i = 0;
   while (wd[i] != '\0') {

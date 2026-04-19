@@ -5,12 +5,14 @@
 #include "cpu/syscall.h"
 #include "filesystem/elf.h"
 #include "filesystem/fat32.h"
+#include "filesystem/file.h"
 #include "graphics/console.h"
 #include "graphics/gfx.h"
 #include "io/ata.h"
 #include "io/e1000.h"
 #include "io/keyboard.h"
 #include "io/keys.h"
+#include "io/mouse.h"
 #include "io/pci.h"
 #include "io/pic.h"
 #include "io/rtc.h"
@@ -22,7 +24,6 @@
 #include "memory/vmm.h"
 #include "net/dhcp.h"
 #include "net/dns.h"
-#include "net/http.h"
 #include "net/icmp.h"
 #include "panic.h"
 #include "scheduler/scheduler.h"
@@ -76,13 +77,15 @@ void kernel_main() {
   pic_mask_all();
   pic_unmask_irq(0);
   pic_unmask_irq(1);
+  pic_unmask_irq(2); // cascade — required for any PIC2 (IRQ8-15) to fire
 
   exceptions_init();
   keyboard_init();
+  mouse_init();
+  pic_unmask_irq(12);
 
   ata_init();
   fat32_init(0);
-
   fat32_print_root();
 
   serial_write("ENABLING STI...");
@@ -100,17 +103,17 @@ void kernel_main() {
   // Read /init to pick the first process ("d" → dafne, else terminal)
   const char *init_elf = "/terminal.elf";
   const char *init_name = "terminal";
-  fat32_file *init_cfg = fat32_open("/init");
-  if (init_cfg && init_cfg->size > 0) {
+  file_handle init_cfg = file_open("/init");
+  if (init_cfg) {
     char first = 0;
-    fat32_read(init_cfg, &first, 1);
+    file_read(init_cfg, &first, 1);
     if (first == 'd') {
       init_elf = "/dafne.elf";
       init_name = "dafne";
     }
   }
 
-  fat32_file *term_file = fat32_open(init_elf);
+  file_handle term_file = file_open(init_elf);
   if (!term_file)
     panic("Cannot find init ELF on disk");
   task *term_task = elf_load(term_file, init_name, "/");
@@ -151,7 +154,7 @@ void kernel_main() {
   icmp_send_ping(IP(10, 0, 2, 2));
   icmp_send_ping(IP(8, 8, 8, 8));
 
-  http_test();
+  // http_test();
 
   time_init();
   scheduler_run();

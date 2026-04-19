@@ -4,6 +4,7 @@
 
 #define USER_STACK_TOP   0x0000800000000000ULL // top of user virtual address space
 #define USER_STACK_PAGES 4
+#define USER_HEAP_BASE   0x0000500000000000ULL // base of user heap (grows up)
 
 extern int g_scheduler_running;
 

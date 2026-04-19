@@ -4,10 +4,10 @@
 
 #define KEY_TAB 0x0E
 
-#define KEY_LEFT  0x10
-#define KEY_UP    0x11
+#define KEY_LEFT 0x10
+#define KEY_UP 0x11
 #define KEY_RIGHT 0x12
-#define KEY_DOWN  0x13
+#define KEY_DOWN 0x13
 
 #define KEY_0 0x30
 #define KEY_1 0x31

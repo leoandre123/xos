@@ -1,0 +1,27 @@
+#pragma once
+#include "gfx.h"
+
+#define WINDOW_TITLE_BAR_HEIGHT 25
+#define WINDOW_MAX_COUNT 10
+
+typedef struct {
+  bool exists;
+  bool title_dirty;
+  bool focused;
+  bool moved;
+  bool hidden;
+  bool hover_minimize;
+  bool hover_close;
+  fb_info surface;
+  // fb_info client;
+  int x;
+  int y;
+  int prev_x;
+  int prev_y;
+  char title[32];
+} window;
+
+void window_focus(window *w);
+void window_focus_next();
+void window_move_to(window *w, int x, int y);
+void window_show(window *w, bool show);

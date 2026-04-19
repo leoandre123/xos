@@ -1,6 +1,7 @@
 #include "gfx.h"
 #include "keyboard.h"
 #include "syscall.h"
+#include "window/window.h"
 
 #define MAX_ANSI_ARGUMENTS 16
 
@@ -135,10 +136,12 @@ static void term_putc(char c) {
 
 int main(void) {
 
+  window_handle wh = window_open(400, 300, "Terminal");
+
   reset_style();
-  sys_write("Hello from terminal!\n");
-  // Map framebuffer and clear screen
-  gfx_map(&g_fb);
+
+  window_get_framebuffer(wh, &g_fb);
+  // gfx_map(&g_fb);
   g_cols = g_fb.width / FONT_GLYPH_WIDTH;
   g_rows = g_fb.height / FONT_GLYPH_HEIGHT;
   g_cx = 0;
@@ -159,8 +162,25 @@ int main(void) {
   sys_exec_fds("/shell.elf", shell_in_r, shell_out_w);
 
   // Main loop: render shell output, forward keyboard input
+
+  window_event ev;
   while (1) {
-    // Drain any pending output from shell
+    if (window_poll_event(wh, &ev)) {
+
+      switch (ev.type) {
+      case WET_KEY_DOWN: {
+        if (ev.key_event.character)
+          sys_write_fd(shell_in_w, &ev.key_event.character, 1);
+      } break;
+      case WET_KEY_UP:
+      case WET_MOUSE:
+      case WET_RESIZE:
+      case WET_MOVE:
+      case WET_CLOSE:
+        break;
+      }
+    }
+
     int avail = sys_pipe_avail(shell_out_r);
     if (avail > 0) {
       char buf[64];
@@ -168,13 +188,9 @@ int main(void) {
       n = sys_read_fd(shell_out_r, buf, (ulong)n);
       for (int i = 0; i < n; i++)
         term_putc(buf[i]);
+
+      window_present(wh);
     }
-
-    // Forward keyboard input to shell (non-blocking)
-    KeyEvent key = sys_read_key_nb();
-
-    if (key.character)
-      sys_write_fd(shell_in_w, &key.character, 1);
 
     sys_yield();
   }

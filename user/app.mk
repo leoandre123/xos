@@ -32,8 +32,8 @@ CRT0 = $(BUILD)/crt0.o
 C_SRCS   := $(shell find . -name '*.c')
 ASM_SRCS := $(shell find . -name '*.asm')
 
-# lib sources excluding crt0 (compiled separately)
-LIB_SRCS := $(filter-out $(USER_ROOT)/lib/crt0.c, $(wildcard $(USER_ROOT)/lib/*.c))
+# lib sources excluding crt0 (compiled separately), including subdirectories
+LIB_SRCS := $(filter-out $(USER_ROOT)/lib/crt0.c, $(shell find $(USER_ROOT)/lib -name '*.c'))
 LIB_OBJS := $(patsubst $(USER_ROOT)/lib/%.c, $(BUILD)/lib/%.o, $(LIB_SRCS))
 
 C_OBJS   := $(patsubst ./%.c,  $(BUILD)/%.o, $(C_SRCS))

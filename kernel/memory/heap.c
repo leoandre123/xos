@@ -59,7 +59,7 @@ static heap_block *find_last_block() {
 }
 
 static heap_block *expand_heap(ulong min_size) {
-  serial_write_line("EXPANDING HEAP");
+  serial_printf("EXPANDING HEAP with: %d bytes\n", min_size);
   heap_block *last_block = find_last_block();
   ASSERT(HEAP_BLOCK_END(last_block) == (ubyte *)g_heap.end);
   ulong min_pages = (min_size + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -119,7 +119,7 @@ void *kmalloc(ulong size) {
 void kfree(void *addr) {
   heap_block *block = g_heap.first_block;
   while (block) {
-    if (block == (heap_block *)addr) {
+    if (block == (heap_block *)(addr - sizeof(heap_block))) {
       block->free = 1;
       return;
     }

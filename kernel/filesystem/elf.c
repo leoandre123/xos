@@ -1,5 +1,6 @@
 #include "elf.h"
-#include "filesystem/fat32.h"
+#include "filesystem/file.h"
+#include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "memory/pmm.h"
@@ -7,9 +8,22 @@
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 
-task *elf_load(fat32_file *file_handle, const char *name, const char *wd) {
+task *elf_load(file_handle file_handle, const char *name, const char *wd) {
+  if (file_handle->size < sizeof(elf_header)) {
+    serial_printf("File to small for an ELF: %s\n", name);
+    return 0;
+  }
+
+  uint magic;
+  file_read(file_handle, &magic, 4);
+
+  if (magic != 0x464c457f) {
+    serial_printf("Invalid magic for ELF header: %x\n", magic);
+    return 0;
+  }
+
   ubyte *data = kmalloc(file_handle->size);
-  fat32_read(file_handle, data, file_handle->size);
+  file_read(file_handle, data, file_handle->size);
 
   elf_header *hdr = (elf_header *)data;
 

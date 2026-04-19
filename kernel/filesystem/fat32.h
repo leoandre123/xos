@@ -1,4 +1,5 @@
 #pragma once
+#include "filesystem/file.h"
 #include "types.h"
 
 #define FAT32_ATTR_READ_ONLY 0x01
@@ -78,10 +79,21 @@ typedef struct {
 typedef struct {
   uint first_cluster;
   uint size;
+  bool is_dir;
 } fat32_file;
 
+extern fs_ops g_fat32_ops;
+
 int fat32_init(uint lba_start);
-fat32_file *fat32_open(const char *path);
+int fat32_open(const char *path, file_handle handle);
+void fat32_close(file_handle handle);
+
 int fat32_write(const char *path, ubyte *buf);
 void fat32_print_root(void);
-uint fat32_read(fat32_file *file, void *buf, uint count);
+uint fat32_read(file_handle handle, void *buf, uint count);
+int fat32_readdir(const char *path, file_dirent *out, int max);
+// int fat32_read_dir(const char *path, fat32_directory_entry *buf, int max_count);
+
+// file_handle fat32_open(const char *path);
+//
+// int fat32_readdir(const char *path, file_dirent *out, int max);

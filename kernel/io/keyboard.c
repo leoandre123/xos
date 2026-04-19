@@ -217,6 +217,9 @@ void on_key_event(void) {
 
   if (extended) {
     switch (sc) {
+    case 0x0f:
+      ev.code = KEY_TAB;
+      break;
     case 0x48:
       ev.code = KEY_UP;
       break;

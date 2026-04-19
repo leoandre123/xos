@@ -1,4 +1,5 @@
 #include "fat32.h"
+#include "filesystem/file.h"
 #include "io/ata.h"
 #include "io/serial.h"
 #include "memory/heap.h"
@@ -7,7 +8,35 @@
 #include "utils/math.h"
 #include <stdbool.h>
 
+#define FAT32_MAX_OPEN_FILES 16
+
 fat32_bpb g_bpb;
+
+fs_ops g_fat32_ops = {
+    .open = fat32_open,
+    .close = fat32_close,
+    .readdir = fat32_readdir,
+    .read = fat32_read,
+};
+
+static fat32_file file_pool[FAT32_MAX_OPEN_FILES] = {0};
+static bool file_pool_used[FAT32_MAX_OPEN_FILES] = {0};
+
+static inline fat32_file *alloc_file() {
+  for (int i = 0; i < FAT32_MAX_OPEN_FILES; i++) {
+    if (!file_pool_used[i]) {
+      file_pool_used[i] = true;
+      return &file_pool[i];
+    }
+  }
+  return 0;
+}
+static inline void free_file(fat32_file *handle) {
+  int idx = handle - file_pool;
+  if (idx >= 0 && idx < FAT32_MAX_OPEN_FILES) {
+    file_pool_used[idx] = false;
+  }
+}
 
 static char to_upper(char c) {
   return (c >= 'a' && c <= 'z') ? c - 0x20 : c;
@@ -83,15 +112,15 @@ static void parse_lfn_name(fat32_lfn_entry *entry, char *buf) {
   buf[12] = (ubyte)entry->name_2[1];
 }
 
-static void read_directory(uint cluster) {
-}
-static void read_file(uint cluster) {
-}
+static int open(const char *path, fat32_file *file) {
 
-void read_BPB(void) {
-}
+  if (path[0] == '/' && path[1] == '\0') {
+    file->first_cluster = g_bpb.root_cluster;
+    file->size = 0;
+    file->is_dir = true;
+    return 0;
+  }
 
-fat32_file *fat32_open(const char *path) {
   uint current_cluster = g_bpb.root_cluster;
 
   fat32_directory_entry entries[16];
@@ -126,7 +155,7 @@ fat32_file *fat32_open(const char *path) {
         // Loop every entry of sector
         for (uint j = 0; j < 16; j++) {
           if (entries[j].name[0] == 0x00) // Last entry -> file not found
-            return 0;
+            return 1;
           if (entries[j].name[0] == 0xE5) // Deleted entry -> skip
             continue;
           if (entries[j].attributes == FAT32_ATTR_LFN) {
@@ -146,10 +175,10 @@ fat32_file *fat32_open(const char *path) {
                          name_matches(entries[j].name, path_start, comp_len);
           if (matches) {
             if (*path_end == '\0') {
-              fat32_file *handle = kmalloc(sizeof(fat32_file));
-              handle->size = entries[j].size;
-              handle->first_cluster = (((uint)entries[j].cluster_high) << 0x10) | entries[j].cluster_low;
-              return handle;
+              file->is_dir = entries[j].attributes & FAT32_ATTR_DIRECTORY;
+              file->size = entries[j].size;
+              file->first_cluster = (((uint)entries[j].cluster_high) << 0x10) | entries[j].cluster_low;
+              return 0;
             } else {
               current_cluster = (((uint)entries[j].cluster_high) << 0x10) | entries[j].cluster_low;
               found_dir = true;
@@ -167,12 +196,24 @@ fat32_file *fat32_open(const char *path) {
     }
 
     if (!found_dir)
-      return 0;
+      return 1;
     path_start = path_end + 1;
   }
 }
 
-uint fat32_read(fat32_file *file, void *buf, uint count) {
+int fat32_open(const char *path, file_handle handle) {
+  fat32_file *file = alloc_file();
+
+  open(path, file);
+  handle->priv = file;
+  handle->size = file->size;
+  return 0;
+}
+void fat32_close(file_handle handle) {
+  free_file(handle->priv);
+}
+
+static uint read(fat32_file *file, void *buf, uint count) {
   ubyte *dst = buf;
   uint bytes_read = 0;
   uint cluster_size = g_bpb.sectors_per_cluster * 512;
@@ -195,80 +236,81 @@ uint fat32_read(fat32_file *file, void *buf, uint count) {
   kfree(tmp);
   return bytes_read;
 }
+uint fat32_read(file_handle handle, void *buf, uint count) {
+  return read(handle->priv, buf, count);
+}
 
-fat32_file *fat32_list_files(const char *path, int *count_read) {
-  uint current_cluster = g_bpb.root_cluster;
-
+int fat32_readdir(const char *path, file_dirent *out, int max) {
+  serial_printf("fat32_readdir: %s\n", path);
   fat32_directory_entry entries[16];
 
-  bool break_out = 0;
+  int count_read = 0;
 
-  /*
-   *
-   * /foo/bar
-   *  ^  ^ ^ ^
-   */
+  bool has_lfn = false;
 
-  char name_buf[255];
-  const char *path_start = path + 1;
-
-  // Loop every path part
-  while (1) {
-    const char *path_end = path_start + 1;
-    while (*path_end != '/' && *path_end != '\0') {
-      path_end++;
-    }
-
-    // Loop every cluster of directory
-    while (current_cluster < 0x0FFFFFF8) {
-      uint sector = cluster_to_sector(current_cluster);
-
-      // Loop every sector of cluster
-      for (uint i = 0; i < g_bpb.sectors_per_cluster; i++) {
-        ata_read(sector + i, 1, &entries);
-
-        // Loop every entry of sector
-        for (uint j = 0; j < 16; j++) {
-          if (entries[j].name[0] == 0x00) // Last entry -> file not found
-            return 0;
-          if (entries[j].name[0] == 0xE5) // Deleted entry -> skip
-            continue;
-          if (entries[j].attributes == FAT32_ATTR_LFN) {
-            fat32_lfn_entry *lfn_entry = (fat32_lfn_entry *)(entries + j);
-            ubyte seq = lfn_entry->sequence_number & FAT32_LFN_SEQUENCE_MASK;
-            if (lfn_entry->sequence_number & FAT32_LFN_ENTRY_LAST) {
-              name_buf[seq * 13] = '\0';
-            }
-            parse_lfn_name(lfn_entry, name_buf + ((seq - 1) * 13));
-            continue;
-          }
-          if (entries[j].attributes & FAT32_ATTR_VOLUME)
-            continue;
-
-          if (path_matches((ubyte *)path_start, (ubyte *)name_buf, (path_end - path_start))) {
-            if (*path_end == '\0') {
-              fat32_file *handle = kmalloc(sizeof(fat32_file));
-              handle->size = entries[j].size;
-              handle->first_cluster = (((uint)entries[j].cluster_high) << 0x10) | entries[j].cluster_low;
-              return handle;
-            } else {
-              break_out = 1;
-              current_cluster = (((uint)entries[j].cluster_high) << 0x10) | entries[j].cluster_low;
-              break;
-            }
-          }
-        }
-        if (break_out)
-          break;
-      }
-
-      if (break_out)
-        break;
-      current_cluster = next_cluster(current_cluster);
-    }
-    break_out = false;
-    path_start = path_end + 1;
+  fat32_file handle;
+  if (open(path, &handle)) {
+    serial_printf("Cannot resolve path: %s\n", path);
+    return 0;
   }
+  if (!handle.is_dir) {
+    serial_printf("Not a directory\n");
+    return 0;
+  }
+  uint current_cluster = handle.first_cluster;
+  while (current_cluster < 0x0FFFFFF8) {
+    // Loop every sector of cluster
+    uint sector = cluster_to_sector(current_cluster);
+    for (uint i = 0; i < g_bpb.sectors_per_cluster; i++) {
+      ata_read(sector + i, 1, &entries);
+      for (int j = 0; j < 16; j++) {
+        if (entries[j].name[0] == 0x00) // Last entry -> file not found
+        {
+          return count_read;
+        }
+        if (entries[j].name[0] == 0xE5) // Deleted entry -> skip
+          continue;
+
+        if (entries[j].name[0] == '.') // Dot entry - skip
+          continue;
+
+        if (entries[j].attributes == FAT32_ATTR_LFN) {
+          has_lfn = true;
+          fat32_lfn_entry *lfn_entry = (fat32_lfn_entry *)(entries + j);
+          ubyte seq = lfn_entry->sequence_number & FAT32_LFN_SEQUENCE_MASK;
+          if (lfn_entry->sequence_number & FAT32_LFN_ENTRY_LAST) {
+            out[count_read].name[seq * 13] = '\0';
+          }
+          parse_lfn_name(lfn_entry, (out[count_read].name) + ((seq - 1) * 13));
+          continue;
+        }
+
+        out[count_read].is_dir = entries[j].attributes & FAT32_ATTR_DIRECTORY;
+        if (!has_lfn) {
+          char *n = &(out[count_read].name[0]);
+          for (int k = 0; k < 11; k++) {
+            char ch = entries[j].name[k];
+            if (ch != ' ')
+              *n++ = ch;
+            if (k == 7)
+              *n++ = '.';
+          }
+          *n = '\0';
+        }
+        serial_printf("- %s (%s)\n", entries[j].name, out[count_read].name);
+
+        has_lfn = false;
+        count_read++;
+        if (count_read == max) {
+          return count_read;
+        }
+      }
+    }
+
+    current_cluster = next_cluster(current_cluster);
+  }
+
+  return count_read;
 }
 
 int fat32_init(uint lba_start) {

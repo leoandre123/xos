@@ -1,6 +1,6 @@
 #pragma once
 
-#include "filesystem/fat32.h"
+#include "filesystem/file.h"
 #include "scheduler/task.h"
 #include "types.h"
 
@@ -43,4 +43,4 @@ typedef struct {
   ulong alignment;
 } __attribute__((packed)) elf_program_header;
 
-task *elf_load(fat32_file *file_handle, const char *name, const char *wd);
+task *elf_load(file_handle file_handle, const char *name, const char *wd);

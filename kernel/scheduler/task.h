@@ -21,5 +21,6 @@ typedef struct task {
   ulong stack_size;
   handle_entry handles[MAX_HANDLES];
   char working_directory[256];
+  ulong heap_next; // next free virtual address for SYS_ALLOC
   struct task *next;
 } task;

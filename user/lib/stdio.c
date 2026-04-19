@@ -135,14 +135,19 @@ void printf(const char *fmt, ...) {
   ctx_flush(&ctx);
 }
 
-int snprintf(char *buf, int size, const char *fmt, ...) {
+int vsnprintf(char *buf, int size, const char *fmt, va_list args) {
   out_ctx ctx = {.str = buf, .limit = size};
-  va_list args;
-  va_start(args, fmt);
   do_fmt(&ctx, fmt, args);
-  va_end(args);
   buf[ctx.pos] = '\0';
   return ctx.pos;
+}
+
+int snprintf(char *buf, int size, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  int n = vsnprintf(buf, size, fmt, args);
+  va_end(args);
+  return n;
 }
 
 int sprintf(char *buf, const char *fmt, ...) {

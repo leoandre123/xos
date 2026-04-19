@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include "syscalls.h"
 #include "time.h"
 #include <stdio.h>
 
@@ -136,7 +137,20 @@ static void cmd_time() {
   printf("Current time is: %04u-%02u-%02u %02u:%02u:%02u\n", dt.year, dt.month,
          dt.day, dt.hour, dt.min, dt.sec);
 }
-static void cmd_help() { printf("I dont know how to help you\n"); }
+static void cmd_help() { out("I dont know how to help you\n"); }
+
+static void cmd_ls(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
+  if (arg_count < 2) {
+    out("Incorrect usage: \n");
+    return;
+  }
+
+  char buf[256 * 10];
+  int count = syscall(SYS_FILE_READDIR, (ulong)args[1], (ulong)&buf, 10);
+  for (int i = 0; i < count; i++) {
+    printf("%s\n", &buf[i * 256]);
+  }
+}
 
 static int parse_command(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH]) {
   int ci = 0;
@@ -189,6 +203,10 @@ static void run(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   }
   if (strcmp(args[0], "help") == 0) {
     cmd_help();
+    return;
+  }
+  if (strcmp(args[0], "ls") == 0) {
+    cmd_ls(args, arg_count);
     return;
   }
 
