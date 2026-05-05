@@ -1,16 +1,19 @@
 #include "fat32.h"
 #include "filesystem/file.h"
-#include "io/ata.h"
 #include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "types.h"
-#include "utils/math.h"
-#include <stdbool.h>
+
+typedef bool (*block_read_fn)(uint lba, ubyte count, void *buf);
+static block_read_fn g_block_read;
+
+void fat32_set_block_read(block_read_fn fn) { g_block_read = fn; }
 
 #define FAT32_MAX_OPEN_FILES 16
 
 fat32_bpb g_bpb;
+static uint g_lba_start;
 
 fs_ops g_fat32_ops = {
     .open = fat32_open,
@@ -84,14 +87,14 @@ static bool path_matches(ubyte *str1, ubyte *str2, int len) {
 
 static inline uint cluster_to_sector(uint cluster) {
   uint data_start = g_bpb.reserved_sectors + g_bpb.fat_count * g_bpb.sectors_per_fat_32;
-  return data_start + (cluster - 2) * g_bpb.sectors_per_cluster;
+  return g_lba_start + data_start + (cluster - 2) * g_bpb.sectors_per_cluster;
 }
 
 static uint next_cluster(uint cluster) {
-  uint lba = g_bpb.reserved_sectors + ((cluster * 4) / 512);
+  uint lba = g_lba_start + g_bpb.reserved_sectors + ((cluster * 4) / 512);
   uint offset = (cluster % (128)) * 4;
   ubyte buf[512];
-  ata_read(lba, 1, &buf);
+  g_block_read(lba, 1, &buf);
   return *(uint *)(buf + offset) & 0x0FFFFFFF;
 }
 
@@ -132,6 +135,7 @@ static int open(const char *path, fat32_file *file) {
    */
 
   char name_buf[255];
+  bool has_lfn = false;
   const char *path_start = path + 1;
   bool found_dir = false;
 
@@ -143,6 +147,7 @@ static int open(const char *path, fat32_file *file) {
     }
 
     found_dir = false;
+    has_lfn = false;
 
     // Loop every cluster of directory
     while (current_cluster < 0x0FFFFFF8) {
@@ -150,14 +155,16 @@ static int open(const char *path, fat32_file *file) {
 
       // Loop every sector of cluster
       for (uint i = 0; i < g_bpb.sectors_per_cluster; i++) {
-        ata_read(sector + i, 1, &entries);
+        g_block_read(sector + i, 1, &entries);
 
         // Loop every entry of sector
         for (uint j = 0; j < 16; j++) {
           if (entries[j].name[0] == 0x00) // Last entry -> file not found
             return 1;
-          if (entries[j].name[0] == 0xE5) // Deleted entry -> skip
+          if (entries[j].name[0] == 0xE5) { // Deleted entry -> skip
+            has_lfn = false;
             continue;
+          }
           if (entries[j].attributes == FAT32_ATTR_LFN) {
             fat32_lfn_entry *lfn_entry = (fat32_lfn_entry *)(entries + j);
             ubyte seq = lfn_entry->sequence_number & FAT32_LFN_SEQUENCE_MASK;
@@ -165,14 +172,18 @@ static int open(const char *path, fat32_file *file) {
               name_buf[seq * 13] = '\0';
             }
             parse_lfn_name(lfn_entry, name_buf + ((seq - 1) * 13));
+            has_lfn = true;
             continue;
           }
-          if (entries[j].attributes & FAT32_ATTR_VOLUME)
+          if (entries[j].attributes & FAT32_ATTR_VOLUME) {
+            has_lfn = false;
             continue;
+          }
 
           int comp_len = path_end - path_start;
-          bool matches = path_matches((ubyte *)path_start, (ubyte *)name_buf, comp_len) ||
+          bool matches = (has_lfn && path_matches((ubyte *)path_start, (ubyte *)name_buf, comp_len)) ||
                          name_matches(entries[j].name, path_start, comp_len);
+          has_lfn = false;
           if (matches) {
             if (*path_end == '\0') {
               file->is_dir = entries[j].attributes & FAT32_ATTR_DIRECTORY;
@@ -203,8 +214,14 @@ static int open(const char *path, fat32_file *file) {
 
 int fat32_open(const char *path, file_handle handle) {
   fat32_file *file = alloc_file();
+  if (!file)
+    return -1;
 
-  open(path, file);
+  if (open(path, file) != 0) {
+    free_file(file);
+    return -1;
+  }
+
   handle->priv = file;
   handle->size = file->size;
   return 0;
@@ -223,7 +240,7 @@ static uint read(fat32_file *file, void *buf, uint count) {
 
   while (cluster < 0x0FFFFFF8 && bytes_read < count) {
     uint lba = cluster_to_sector(cluster);
-    ata_read(lba, g_bpb.sectors_per_cluster, tmp);
+    g_block_read(lba, g_bpb.sectors_per_cluster, tmp);
 
     uint remaining = count - bytes_read;
     uint to_copy = remaining < cluster_size ? remaining : cluster_size;
@@ -262,7 +279,7 @@ int fat32_readdir(const char *path, file_dirent *out, int max) {
     // Loop every sector of cluster
     uint sector = cluster_to_sector(current_cluster);
     for (uint i = 0; i < g_bpb.sectors_per_cluster; i++) {
-      ata_read(sector + i, 1, &entries);
+      g_block_read(sector + i, 1, &entries);
       for (int j = 0; j < 16; j++) {
         if (entries[j].name[0] == 0x00) // Last entry -> file not found
         {
@@ -314,7 +331,9 @@ int fat32_readdir(const char *path, file_dirent *out, int max) {
 }
 
 int fat32_init(uint lba_start) {
-  ata_read(lba_start, 1, &g_bpb);
+  g_lba_start = lba_start;
+  g_block_read(lba_start, 1, &g_bpb);
+  return 0;
 }
 
 void fat32_print_root(void) {
@@ -327,7 +346,7 @@ void fat32_print_root(void) {
   while (current_cluster) {
     uint sector = cluster_to_sector(current_cluster);
     for (uint i = 0; i < g_bpb.sectors_per_cluster; i++) {
-      ata_read(sector + i, 1, &entries);
+      g_block_read(sector + i, 1, &entries);
       for (uint j = 0; j < 16; j++) {
         if (entries[j].name[0] == 0x00)
           return;

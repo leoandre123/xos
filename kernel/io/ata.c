@@ -21,21 +21,14 @@
 
 static bool ata_wait(void) {
   ubyte status;
-  // wait for BSY to clear
-  do {
-    status = inb(ATA_STATUS);
-    if (status & ATA_STATUS_ERR)
-      return false;
-  } while (status & ATA_STATUS_BSY);
+  int timeout = 100000;
 
-  // wait for DRQ to set
-  do {
+  while (timeout--) {
     status = inb(ATA_STATUS);
-    if (status & ATA_STATUS_ERR)
-      return false;
-  } while (!(status & ATA_STATUS_DRQ));
-
-  return true;
+    if (status & ATA_STATUS_ERR) return false;
+    if (!(status & ATA_STATUS_BSY) && (status & ATA_STATUS_DRQ)) return true;
+  }
+  return false;
 }
 
 bool ata_init(void) {

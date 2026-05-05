@@ -136,19 +136,25 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   }
 
   case SYS_EXEC: {
+    serial_printf("SYS_EXEC: '%s'\n", (const char *)arg1);
     file_handle handle = file_open((const char *)arg1);
 
-    if (!handle)
+    if (!handle) {
+      serial_printf("SYS_EXEC: file_open failed for '%s'\n", (const char *)arg1);
       return -1;
+    }
 
     task *parent = scheduler_current();
 
-    task *t = elf_load(handle, "", parent->working_directory);
+    task *t = elf_load(handle, (const char *)arg1, parent->working_directory);
 
     file_close(handle);
 
-    if (!t)
+    if (!t) {
+      serial_printf("SYS_EXEC: elf_load failed for '%s'\n", (const char *)arg1);
       return (ulong)-1;
+    }
+    serial_printf("SYS_EXEC: created task pid=%d for '%s'\n", t->pid, (const char *)arg1);
     // Inherit stdin/stdout handles if provided (arg2=stdin_fd, arg3=stdout_fd)
 
     if (arg2 != (ulong)-1) {

@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "graphics/console.h"
 #include "io/serial.h"
 #include "memory.h"
 #include "panic.h"
@@ -73,15 +74,23 @@ static void pmm_reserve_region(ulong addr, int size) {
 
 void pmm_init(BootInfo *boot_info) {
 
-  ulong page_count = 0;
   ubyte *cur = (ubyte *)(ulong)boot_info->memory_map;
   ubyte *end = cur + boot_info->memory_map_size;
 
+  // Size the bitmap by the highest EfiConventionalMemory page index, not the
+  // sum of all pages. Real UEFI maps include huge MMIO descriptors that would
+  // inflate the sum and make the bitmap impossibly large.
+  ulong max_page = 0;
   while (cur < end) {
     EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
-    page_count += desc->NumberOfPages;
+    if (desc->Type == 7 && desc->NumberOfPages > 0) {
+      ulong last = addr_to_page(desc->PhysicalStart + (desc->NumberOfPages - 1) * 4096ULL);
+      if (last > max_page)
+        max_page = last;
+    }
     cur += boot_info->memory_map_desc_size;
   }
+  ulong page_count = max_page + 1;
 
   g_pmm.bitmap = 0;
   g_pmm.page_count = page_count;
@@ -90,19 +99,39 @@ void pmm_init(BootInfo *boot_info) {
   g_pmm.last_index = 0;
   g_pmm.max_address = 0;
 
+  console_writef("PMM: desc_sz=%u map_sz=%u bitmap_sz=%u\n",
+                 (uint)boot_info->memory_map_desc_size,
+                 (uint)boot_info->memory_map_size,
+                 (uint)g_pmm.bitmap_size);
+
+  cur = (ubyte *)(ulong)boot_info->memory_map;
+  while (cur < end) {
+    EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
+    if (desc->Type == 7)
+      console_writef("  [FREE] phys=%x pages=%u\n",
+                     desc->PhysicalStart, (uint)desc->NumberOfPages);
+    cur += boot_info->memory_map_desc_size;
+  }
+
+  bool found = false;
   cur = (ubyte *)(ulong)boot_info->memory_map;
   while (cur < end) {
     EfiMemoryDescriptor *desc = (EfiMemoryDescriptor *)cur;
 
-    if (desc->Type == 7 && desc->NumberOfPages * 4096ULL >= g_pmm.bitmap_size) {
+    if (desc->Type == 7 &&
+        desc->PhysicalStart != 0 &&
+        desc->NumberOfPages * 4096ULL >= g_pmm.bitmap_size) {
       g_pmm.bitmap = (ubyte *)desc->PhysicalStart;
+      found = true;
       break;
     }
 
     cur += boot_info->memory_map_desc_size;
   }
-  if (!g_pmm.bitmap) {
+  if (!found) {
     panic("PMM: failed to find space for bitmap");
+  } else {
+    console_writef("PMM Bitmap allocated");
   }
 
   memset8(g_pmm.bitmap, 0xFF, g_pmm.bitmap_size);

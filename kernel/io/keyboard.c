@@ -266,3 +266,8 @@ KeyEvent keyboard_last(void) {
   g_last.character = 0;
   return event;
 }
+
+void keyboard_inject(KeyEvent ev) {
+  if (ev.code != KEY_NONE)
+    g_last = ev;
+}

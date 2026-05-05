@@ -1,5 +1,4 @@
 #include "ip.h"
-#include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "net/arp.h"
@@ -50,11 +49,8 @@ static void ip_add_pending(ipv4_addr dst_addr, void *packet, ushort packet_len) 
 }
 
 static ipv4_addr next_hop(ipv4_addr dst) {
-  // 10.0.2.x → local, send directly
-  if (dst.parts[0] == 10 && dst.parts[1] == 0 && dst.parts[2] == 2)
-    return dst;
-  // everything else → default gateway
-  return ipv4(10, 0, 2, 2);
+  // Always ARP directly — works on any LAN without a configured gateway
+  return dst;
 }
 
 void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_len) {
@@ -76,14 +72,18 @@ void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_l
 
   header.header_checksum = ip_checksum(&header, sizeof(ipv4_header));
 
-  serial_write("ip_send. g_ip = ");
-  serial_write_hex(g_ip.value);
-  serial_write_char('\n');
-
   ushort total = sizeof(ipv4_header) + payload_len;
   void *packet = kmalloc(total);
   memcpy8(packet, (ubyte *)&header, sizeof(ipv4_header));
   memcpy8(((ubyte *)packet) + sizeof(ipv4_header), payload, payload_len);
+
+  // Broadcast IP → broadcast MAC, no ARP needed
+  if (dst_addr.value == 0xFFFFFFFF) {
+    mac_addr bcast = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
+    ethernet_send(bcast, ETHERTYPE_IPV4, packet, total);
+    kfree(packet);
+    return;
+  }
 
   ipv4_addr arp_target = next_hop(dst_addr);
   mac_addr mac;
@@ -111,7 +111,6 @@ void ip_send_pending(ipv4_addr dst_addr) {
 }
 
 void ip_receive(void *data, ushort data_len) {
-  serial_write_line("IP: received packet");
   if (data_len < sizeof(ipv4_header)) {
     return;
   }

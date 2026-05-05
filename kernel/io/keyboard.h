@@ -9,3 +9,4 @@ typedef struct {
 
 void keyboard_init(void);
 KeyEvent keyboard_last(void);
+void keyboard_inject(KeyEvent ev);

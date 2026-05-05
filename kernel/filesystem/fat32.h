@@ -73,7 +73,7 @@ typedef struct {
   ubyte checksum;
   ushort name_1[6];
   ushort first_cluster;
-  ushort name_2[2]
+  ushort name_2[2];
 } __attribute__((packed)) fat32_lfn_entry;
 
 typedef struct {
@@ -84,6 +84,8 @@ typedef struct {
 
 extern fs_ops g_fat32_ops;
 
+typedef bool (*fat32_block_read_fn)(uint lba, ubyte count, void *buf);
+void fat32_set_block_read(fat32_block_read_fn fn);
 int fat32_init(uint lba_start);
 int fat32_open(const char *path, file_handle handle);
 void fat32_close(file_handle handle);

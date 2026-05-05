@@ -6,6 +6,8 @@ global enter_kernel_main
 extern bootstrap_main
 extern kernel_pre_main
 extern kernel_main
+extern __bss_start
+extern __bss_end
 
 section .bootstrap.text
 bits 64
@@ -21,6 +23,16 @@ _start:
     jmp .hang
 
 enter_higher_half:
+    ; Zero BSS — UEFI on real hardware does not guarantee zeroed pages.
+    ; Save boot_info (RDI) across the rep stosb which clobbers RDI, RCX, RAX.
+    push rdi
+    mov rdi, __bss_start
+    mov rcx, __bss_end
+    sub rcx, rdi
+    xor eax, eax
+    rep stosb
+    pop rdi
+
     mov rax, kernel_pre_main
     jmp rax
 

@@ -16,6 +16,10 @@ ushort inw(ushort port) {
   return value;
 }
 
+void outw(ushort port, ushort value) {
+  asm volatile("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
 void outl(ushort port, uint value) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
 uint inl(ushort port) {
   uint value;

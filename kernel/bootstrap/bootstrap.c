@@ -38,7 +38,10 @@ extern ulong get_kernel_main_addr(void);
 BOOT_DATA static page_table_t g_pml4;
 
 BOOT_DATA static page_table_t g_low_pdpt;
-BOOT_DATA static page_table_t g_low_pd;
+BOOT_DATA static page_table_t g_low_pd;  // covers 0x00000000–0x40000000
+BOOT_DATA static page_table_t g_low_pd1; // covers 0x40000000–0x80000000
+BOOT_DATA static page_table_t g_low_pd2; // covers 0x80000000–0xC0000000
+BOOT_DATA static page_table_t g_low_pd3; // covers 0xC0000000–0x100000000
 
 BOOT_DATA static page_table_t g_high_pdpt;
 BOOT_DATA static page_table_t g_high_pd;
@@ -93,7 +96,6 @@ BOOT_CODE void bootstrap_main(BootInfo *boot_info) {
   memset64((ulong *)g_pml4, 0, 512);
 
   memset64((ulong *)g_low_pdpt, 0, 512);
-  memset64((ulong *)g_low_pd, 0, 512);
 
   memset64((ulong *)g_high_pdpt, 0, 512);
   memset64((ulong *)g_high_pd, 0, 512);
@@ -105,16 +107,21 @@ BOOT_CODE void bootstrap_main(BootInfo *boot_info) {
   serial_write_boot(STR_BOOTSTRAP);
 
   // ------------------------------------------------------------
-  // 1. Low identity map: first 1 GiB using 2 MiB huge pages
+  // 1. Low identity map: first 4 GiB using 2 MiB huge pages
+  //    Needed because framebuffers often live above 1 GiB (e.g. 0xFD000000)
   // ------------------------------------------------------------
   g_pml4[0] =
       ((ulong)g_low_pdpt & PAGE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITABLE;
-  g_low_pdpt[0] =
-      ((ulong)g_low_pd & PAGE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITABLE;
 
-  for (ulong i = 0; i < 512; ++i) {
-    g_low_pd[i] =
-        (i * PAGE_SIZE_2M) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
+  page_table_t *low_pds[4] = {&g_low_pd, &g_low_pd1, &g_low_pd2, &g_low_pd3};
+  for (ulong pd = 0; pd < 4; ++pd) {
+    memset64((ulong *)low_pds[pd], 0, 512);
+    g_low_pdpt[pd] =
+        ((ulong)low_pds[pd] & PAGE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITABLE;
+    for (ulong i = 0; i < 512; ++i) {
+      (*low_pds[pd])[i] =
+          (pd * 512 * PAGE_SIZE_2M + i * PAGE_SIZE_2M) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
+    }
   }
 
   // ------------------------------------------------------------

@@ -40,9 +40,8 @@ __attribute__((noreturn)) void task_bootstrap() {
 }
 
 __attribute__((noreturn)) static void user_task_bootstrap() {
-  serial_write_line("Setting kernel stack");
+  serial_printf("user_task_bootstrap: task='%s' entry=%x\n", g_current->name, (ulong)g_current->entry);
   gdt_set_kernel_stack((ulong)g_current->stack_base + g_current->stack_size);
-  serial_write_line("Jumping to ring 3");
   jump_to_userspace((ulong)g_current->entry, (ulong)g_current->user_rsp);
 }
 

@@ -1,5 +1,5 @@
 #include "e1000.h"
-#include "io/serial.h"
+#include "io/logging.h"
 #include "memory/heap.h"
 #include "memory/vmm.h"
 #include "net_types.h"
@@ -28,6 +28,7 @@
 #define E1000_RAH    0x5404 // Receive address high
 
 // CTRL bits
+#define E1000_CTRL_SLU (1 << 6)  // Set Link Up (required on I219)
 #define E1000_CTRL_RST (1 << 26) // Full reset
 
 // RCTL bits
@@ -56,18 +57,18 @@
 
 // Transmit descriptor (16 bytes)
 typedef struct {
-  ulong addr; // Physical address of packet buffer
+  ulong addr;
   ushort length;
-  ubyte cso; // Checksum offset (unused)
-  ubyte cmd; // Command flags
+  ubyte cso;
+  ubyte cmd;
   ubyte status;
-  ubyte css;      // Checksum start (unused)
-  ushort special; // Unused
+  ubyte css;
+  ushort special;
 } __attribute__((packed)) tx_desc;
 
 // Receive descriptor (16 bytes)
 typedef struct {
-  ulong addr; // Physical address of packet buffer
+  ulong addr;
   ushort length;
   ushort checksum;
   ubyte status;
@@ -76,14 +77,13 @@ typedef struct {
 } __attribute__((packed)) rx_desc;
 
 static volatile ubyte *mmio_base;
-static tx_desc *tx_descs;
-static rx_desc *rx_descs;
+static volatile tx_desc *tx_descs;
+static volatile rx_desc *rx_descs;
 static ubyte *rx_buffers[RX_DESC_COUNT];
 static int tx_tail = 0;
 static int rx_tail = 0;
 static mac_addr g_mac;
 
-// Forward declaration — ethernet layer provides this
 void ethernet_receive(ubyte *data, ushort len);
 
 static uint e1000_read(uint reg) {
@@ -94,27 +94,16 @@ static void e1000_write(uint reg, uint val) {
   *((volatile uint *)(mmio_base + reg)) = val;
 }
 
-// Read MAC address from EEPROM
+// Read MAC from Receive Address registers — works on both e1000 and e1000e/I219
 static void e1000_read_mac(mac_addr *mac) {
-  // Trigger EEPROM read for word 0
-  e1000_write(E1000_EERD, (0 << 8) | 1);
-  uint val;
-  while (!((val = e1000_read(E1000_EERD)) & (1 << 4)))
-    ;
-  mac->parts[0] = val >> 16;
-  mac->parts[1] = val >> 24;
-
-  e1000_write(E1000_EERD, (1 << 8) | 1);
-  while (!((val = e1000_read(E1000_EERD)) & (1 << 4)))
-    ;
-  mac->parts[2] = val >> 16;
-  mac->parts[3] = val >> 24;
-
-  e1000_write(E1000_EERD, (2 << 8) | 1);
-  while (!((val = e1000_read(E1000_EERD)) & (1 << 4)))
-    ;
-  mac->parts[4] = val >> 16;
-  mac->parts[5] = val >> 24;
+  uint ral = e1000_read(E1000_RAL);
+  uint rah = e1000_read(E1000_RAH);
+  mac->parts[0] = (ral >>  0) & 0xFF;
+  mac->parts[1] = (ral >>  8) & 0xFF;
+  mac->parts[2] = (ral >> 16) & 0xFF;
+  mac->parts[3] = (ral >> 24) & 0xFF;
+  mac->parts[4] = (rah >>  0) & 0xFF;
+  mac->parts[5] = (rah >>  8) & 0xFF;
 }
 
 static void e1000_init_rx(void) {
@@ -139,7 +128,7 @@ static void e1000_init_tx(void) {
   tx_descs = kmalloc(sizeof(tx_desc) * TX_DESC_COUNT);
 
   for (int i = 0; i < TX_DESC_COUNT; i++) {
-    tx_descs[i].status = E1000_TXD_STAT_DD; // mark all as done so they're free
+    tx_descs[i].status = E1000_TXD_STAT_DD;
   }
 
   ulong phys = vmm_virt_to_phys(&g_kernel_address_space, (ulong)tx_descs);
@@ -152,37 +141,55 @@ static void e1000_init_tx(void) {
 }
 
 void e1000_init(ulong mmio_phys) {
-  // MMIO regions are not RAM so they're not covered by the HHDM mapping.
-  // Explicitly map the NIC's 128KB register space at its HHDM-equivalent address.
   vmm_map_bytes(&g_kernel_address_space,
                 (ulong)PHYS_TO_HHDM(mmio_phys), mmio_phys,
-                128 * 1024, PAGE_PRESENT | PAGE_WRITABLE);
+                128 * 1024, PAGE_PRESENT | PAGE_WRITABLE | PAGE_CACHE_DISABLE);
+  {
+    ulong va = (ulong)PHYS_TO_HHDM(mmio_phys);
+    ulong va_end = va + 128 * 1024;
+    for (; va < va_end; va += 4096)
+      __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+  }
 
   mmio_base = (volatile ubyte *)PHYS_TO_HHDM(mmio_phys);
+  klogf(LOG_TRACE, "e1000: mmio_phys=%x", mmio_phys);
 
-  // Reset
-  e1000_write(E1000_CTRL, e1000_read(E1000_CTRL) | E1000_CTRL_RST);
-  // Wait for reset to clear
-  while (e1000_read(E1000_CTRL) & E1000_CTRL_RST)
-    ;
+  uint ctrl_before = e1000_read(E1000_CTRL);
+  klogf(LOG_TRACE, "e1000: CTRL before reset=%x", ctrl_before);
 
-  // Clear multicast table
+  // On I219-LM, writing CTRL.RST puts the PCIe device briefly offline.
+  // Polling MMIO immediately causes completion timeouts (50-200ms each).
+  // Spin without touching MMIO first, then poll with a bounded timeout.
+  e1000_write(E1000_CTRL, ctrl_before | E1000_CTRL_RST);
+  klogf(LOG_TRACE, "e1000: RST written, waiting...");
+  for (volatile int j = 0; j < 2000000; j++) ;
+  klogf(LOG_TRACE, "e1000: post-RST delay done, polling...");
+
+  int rst_timeout = 1000;
+  while ((e1000_read(E1000_CTRL) & E1000_CTRL_RST) && --rst_timeout)
+    for (volatile int j = 0; j < 10000; j++) ;
+  klogf(LOG_TRACE, "e1000: RST poll done timeout_left=%d", rst_timeout);
+  if (!rst_timeout) {
+    klogf(LOG_ERROR, "e1000: reset timeout, NIC not responding");
+    return;
+  }
+
+  e1000_write(E1000_CTRL, e1000_read(E1000_CTRL) | E1000_CTRL_SLU);
+  klogf(LOG_TRACE, "e1000: SLU set");
+
   for (int i = 0; i < 128; i++)
     e1000_write(E1000_MTA + i * 4, 0);
+  klogf(LOG_TRACE, "e1000: MTA cleared");
 
   e1000_read_mac(&g_mac);
-  serial_write("e1000 MAC: ");
-  for (int i = 0; i < 6; i++) {
-    serial_write_hex8(g_mac.parts[i]);
-    if (i < 5)
-      serial_write_char(':');
-  }
-  serial_write_char('\n');
+  klogf(LOG_TRACE, "e1000: MAC=%x:%x:%x:%x:%x:%x",
+        g_mac.parts[0], g_mac.parts[1], g_mac.parts[2],
+        g_mac.parts[3], g_mac.parts[4], g_mac.parts[5]);
 
   e1000_init_rx();
+  klogf(LOG_TRACE, "e1000: RX init done");
   e1000_init_tx();
-
-  serial_write_line("e1000 initialized!");
+  klogf(LOG_TRACE, "e1000: initialized");
 }
 
 void e1000_get_mac(mac_addr *mac_out) {
@@ -191,12 +198,7 @@ void e1000_get_mac(mac_addr *mac_out) {
 
 void e1000_poll(void) {
   while (rx_descs[rx_tail].status & E1000_RXD_STAT_DD) {
-    serial_write("e1000: got packet len=");
-    serial_write_hex16(rx_descs[rx_tail].length);
-    serial_write_char('\n');
     ethernet_receive(rx_buffers[rx_tail], rx_descs[rx_tail].length);
-
-    // Give descriptor back to NIC
     rx_descs[rx_tail].status = 0;
     e1000_write(E1000_RDT, rx_tail);
     rx_tail = (rx_tail + 1) % RX_DESC_COUNT;
@@ -204,7 +206,6 @@ void e1000_poll(void) {
 }
 
 void e1000_send(void *data, ushort len) {
-  // Wait for the descriptor to be free
   while (!(tx_descs[tx_tail].status & E1000_TXD_STAT_DD))
     ;
 

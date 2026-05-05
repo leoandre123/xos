@@ -36,7 +36,10 @@ file_handle file_open(const char *path) {
 
   const fs_ops *ops = fs_lookup(path);
 
-  ops->open(path, handle);
+  if (ops->open(path, handle) != 0) {
+    free_handle(handle);
+    return 0;
+  }
 
   return handle;
 }

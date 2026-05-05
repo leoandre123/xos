@@ -1,10 +1,11 @@
 #include "ethernet.h"
-#include "io/e1000.h"
+#include "io/logging.h"
 #include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "net/ip.h"
 #include "net/net.h"
+#include "net/networking.h"
 #include "net_types.h"
 #include "types.h"
 
@@ -19,7 +20,7 @@ void ethernet_receive(ubyte *data, ushort len) {
   ushort ethertype = ntohs(frame->ethertype);
   ubyte *payload = data + sizeof(ethernet_frame);
   ushort plen = len - sizeof(ethernet_frame);
-  serial_printf("Ethernet frame - type: 0x%2x\n", ethertype);
+  // klogf(LOG_TRACE, "Ethernet frame - type: 0x%2x", ethertype);
   switch (ethertype) {
   case ETHERTYPE_ARP:
     arp_receive(payload, plen);
@@ -38,11 +39,11 @@ void ethernet_send(mac_addr dst, ushort ethertype, void *payload, ushort payload
   ubyte *buf = kmalloc(total);
 
   ethernet_frame *frame = (ethernet_frame *)buf;
-  e1000_get_mac(&frame->src);
+  g_main_driver->get_mac(&frame->src);
   frame->dst = dst;
   frame->ethertype = htons(ethertype);
 
   memcpy8(buf + sizeof(ethernet_frame), payload, payload_len);
-  e1000_send(buf, total);
+  g_main_driver->send(buf, total);
   kfree(buf);
 }

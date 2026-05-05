@@ -10,4 +10,7 @@ void console_write_hex64(ulong value);
 void console_write_u32(uint value);
 void console_set_fg_color(uint value);
 void console_set_bg_color(uint value);
+uint console_get_fg_color();
+uint console_get_bg_color();
 void console_set_cursor(int x, int y);
+void console_writef(const char *fmt, ...);

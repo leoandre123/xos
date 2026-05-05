@@ -1,4 +1,5 @@
 #include "exceptions.h"
+#include "graphics/console.h"
 #include "idt.h"
 #include "io/serial.h"
 #include "panic.h"
@@ -162,6 +163,31 @@ void pagefault_handler(interrupt_frame *frame) {
     asm volatile("cli; hlt");
   }
 }
+void pagefault_handler2(interrupt_frame *frame) {
+  console_writef("===== PAGE FAULT =====\n");
+
+  ulong cr2;
+  asm volatile("mov %%cr2, %0" : "=r"(cr2));
+  console_writef("CR2: %x\n", cr2);
+  console_writef("RIP: %x\n", frame->rip);
+
+  console_writef("Page present: %s\n", frame->error_code & 1 ? "Yes" : "No");
+  console_writef("Write: %s\n", (frame->error_code >> 1) & 1 ? "Yes" : "No");
+  console_writef("User: %s\n", (frame->error_code >> 2) & 1 ? "Yes" : "No");
+  console_writef("Instruction fetch: %s\n", (frame->error_code >> 4) & 1 ? "Yes" : "No");
+
+  console_writef("RSP: %x\n", frame->rsp);
+  console_writef("RAX: %x\n", frame->rax);
+  console_writef("RBX: %x\n", frame->rbx);
+  console_writef("RCX: %x\n", frame->rcx);
+  console_writef("RDX: %x\n", frame->rdx);
+
+  dump_frame(frame);
+
+  for (;;) {
+    asm volatile("cli; hlt");
+  }
+}
 
 void breakpoint_handler(interrupt_frame *frame) {
   serial_write_line(g_exception_names[frame->vector]);
@@ -171,5 +197,5 @@ void breakpoint_handler(interrupt_frame *frame) {
 void exceptions_init() {
   register_default_handler((interrupt_handler_t)default_handler);
   register_interrupt_handler(EX_BREAKPOINT, (interrupt_handler_t)breakpoint_handler);
-  register_interrupt_handler(EX_PAGE_FAULT, pagefault_handler);
+  register_interrupt_handler(EX_PAGE_FAULT, pagefault_handler2);
 }

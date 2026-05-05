@@ -51,9 +51,11 @@ SECTIONS
     }
 
     .bss ALIGN(4K) : AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 4K)) {
+        __bss_start = .;
         *(COMMON)
         *(.bss)
         *(.bss.*)
+        __bss_end = .;
     }
 __kernel_virt_start = ADDR(.text);
 __kernel_virt_end   = ALIGN(ADDR(.bss) + SIZEOF(.bss), 4K);

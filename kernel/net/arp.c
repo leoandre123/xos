@@ -1,6 +1,6 @@
 #include "arp.h"
 #include "io/e1000.h"
-#include "io/serial.h"
+#include "io/logging.h"
 #include "memory/memutils.h"
 #include "net/dhcp.h"
 #include "net/ethernet.h"
@@ -29,32 +29,26 @@ static void arp_reply_ipv4(ipv4_addr from_addr, mac_addr from_mac) {
 }
 
 void arp_receive(ubyte *data, ushort len) {
-  serial_write_line("ARP");
-  if (len < sizeof(arp_packet_ipv4)) {
-    serial_write_line("Packet to small for ARP");
+  if (len < sizeof(arp_packet_ipv4))
     return;
-  }
-  serial_write_line("ARP 2");
 
   arp_packet_ipv4 *packet = (arp_packet_ipv4 *)data;
-  ipv4_addr ipv4 = packet->sender_ip_address;
-  mac_addr mac = packet->sender_mac_address;
-
+  ipv4_addr sender_ip = packet->sender_ip_address;
+  mac_addr  sender_mac = packet->sender_mac_address;
   ushort op = ntohs(packet->op_code);
 
   if (op == ARP_REPLY) {
-    arp_table_add(ipv4, mac);
-
-    ip_send_pending(ipv4);
-
-    serial_printf("ARP: %1d.%1d.%1d.%1d is at %02x:%02x:%02x:%02x:%02x:%02x\n",
-                  ipv4.parts[0], ipv4.parts[1],
-                  ipv4.parts[2], ipv4.parts[3],
-                  mac.parts[0], mac.parts[1], mac.parts[2],
-                  mac.parts[3], mac.parts[4], mac.parts[5]);
+    arp_table_add(sender_ip, sender_mac);
+    ip_send_pending(sender_ip);
+    klogf(LOG_DEBUG, "ARP reply: %d.%d.%d.%d is at %02x:%02x:%02x:%02x:%02x:%02x",
+          sender_ip.parts[0], sender_ip.parts[1],
+          sender_ip.parts[2], sender_ip.parts[3],
+          sender_mac.parts[0], sender_mac.parts[1], sender_mac.parts[2],
+          sender_mac.parts[3], sender_mac.parts[4], sender_mac.parts[5]);
   } else if (op == ARP_REQUEST) {
-    serial_printf("ARP REQUEST FOR: %1d.%1d.%1d.%1d", ipv4.parts[0], ipv4.parts[1],
-                  ipv4.parts[2], ipv4.parts[3]);
+    // Only reply when someone is asking for our IP
+    if (packet->target_ip_address.value == g_ip.value)
+      arp_reply_ipv4(sender_ip, sender_mac);
   }
 }
 
@@ -66,10 +60,7 @@ void arp_send_ipv4(ipv4_addr addr) {
   arp_packet.protocol_length = 4;
   arp_packet.op_code = htons(ARP_REQUEST);
   e1000_get_mac(&arp_packet.sender_mac_address);
-  arp_packet.sender_ip_address.parts[0] = 10;
-  arp_packet.sender_ip_address.parts[1] = 0;
-  arp_packet.sender_ip_address.parts[2] = 2;
-  arp_packet.sender_ip_address.parts[3] = 15;
+  arp_packet.sender_ip_address = g_ip;
   memset8(arp_packet.target_mac_address.parts, 0x00, 6);
   arp_packet.target_ip_address = addr;
   arp_packet.target_ip_address = addr;

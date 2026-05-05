@@ -2,6 +2,7 @@
 #include "cpu/idt.h"
 #include "io/e1000.h"
 #include "io/io.h"
+#include "io/xhci.h"
 #include "scheduler/scheduler.h"
 #include "types.h"
 #define PIT_COMMAND        0x43
@@ -14,6 +15,7 @@ uint g_timer_frequency = 0;
 void timer_handler() {
   g_timer_ticks++;
   e1000_poll();
+  xhci_poll();
   if (g_scheduler_running)
     schedule();
 }
