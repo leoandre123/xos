@@ -96,3 +96,13 @@ bool ui_checkbox(ui_ctx *ctx, int x, int y, const char *label, bool *checked) {
 
   return clicked;
 }
+
+// void ui_img(ui_ctx *ctx, int x, int y, bitmap *img) {
+//   for (uint yy = 0; yy < img->height; yy++) {
+//     for (uint xx = 0; xx < img->width; xx++) {
+//       gfx_pixel_blend(&ctx->fb, x + xx, y + yy,
+//                       img->data[yy * img->width + xx]);
+//     }
+//   }
+//   fb_mark_dirty(&ctx->fb, x, y, img->width, img->height);
+// }

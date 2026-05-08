@@ -180,6 +180,7 @@ int main(void) {
   sys_exec("/test_app.elf");
   sys_exec("/terminal_2.elf");
   sys_exec("/files.elf");
+  sys_exec("/test_app2.elf");
   sys_read_mouse(&g_mouse);
   while (1) {
 

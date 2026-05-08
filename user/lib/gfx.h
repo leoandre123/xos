@@ -1,10 +1,14 @@
 #pragma once
 #include "fb_info.h"
 #include "font.h"
+#include "image.h"
 #include "rect.h"
 #include "syscall.h"
 #include <stdarg.h>
 #include <stdio.h>
+
+#define RGB(r, g, b) ((0xff << 24u) | (r << 16u) | (g << 8u) | (b))
+#define ARGB(a, r, g, b) ((a << 24u) | (r << 16u) | (g << 8u) | (b))
 
 // Expand the dirty rect to include (x, y, w, h).
 static inline void fb_mark_dirty(fb_info *fb, uint x, uint y, uint w, uint h) {
@@ -43,6 +47,30 @@ static inline void gfx_pixel(fb_info *fb, uint x, uint y, uint color) {
   fb->ptr[y * (fb->pitch / 4) + x] = color;
 }
 
+static inline void gfx_pixel_blend(fb_info *fb, uint x, uint y, uint color) {
+  if (x >= fb->width || y >= fb->height)
+    return;
+  uint src_a = (color >> 24) & 0xFF;
+  if (src_a == 0)
+    return;
+  uint pitch_px = fb->pitch / 4;
+  if (src_a == 255) {
+    fb->ptr[y * pitch_px + x] = color;
+    return;
+  }
+  uint dst = fb->ptr[y * pitch_px + x];
+  uint src_r = (color >> 16) & 0xFF;
+  uint src_g = (color >> 8) & 0xFF;
+  uint src_b = color & 0xFF;
+  uint dst_r = (dst >> 16) & 0xFF;
+  uint dst_g = (dst >> 8) & 0xFF;
+  uint dst_b = dst & 0xFF;
+  uint inv_a = 255 - src_a;
+  fb->ptr[y * pitch_px + x] = ((src_r * src_a + dst_r * inv_a) / 255) << 16 |
+                              ((src_g * src_a + dst_g * inv_a) / 255) << 8 |
+                              ((src_b * src_a + dst_b * inv_a) / 255);
+}
+
 static inline void gfx_fill(fb_info *fb, uint color) {
   uint pitch_px = fb->pitch / 4;
   for (uint y = 0; y < fb->height; y++)
@@ -55,7 +83,7 @@ static inline void gfx_rect(fb_info *fb, uint x, uint y, uint w, uint h,
                             uint color) {
   for (uint dy = 0; dy < h; dy++)
     for (uint dx = 0; dx < w; dx++)
-      gfx_pixel(fb, x + dx, y + dy, color);
+      gfx_pixel_blend(fb, x + dx, y + dy, color);
   fb_mark_dirty(fb, x, y, w, h);
 }
 
@@ -245,9 +273,12 @@ static inline void gfx_blit_region_rounded(fb_info *dst, int dx, int dy,
     // intersect mask bounds with subrect column range [sx, sx+sw)
     int icol0 = (int)fx0 - sx;
     int icol1 = (int)fx1 - sx;
-    if (icol0 < 0) icol0 = 0;
-    if (icol1 > (int)sw) icol1 = (int)sw;
-    if (icol0 >= icol1) continue;
+    if (icol0 < 0)
+      icol0 = 0;
+    if (icol1 > (int)sw)
+      icol1 = (int)sw;
+    if (icol0 >= icol1)
+      continue;
     uint col0 = (uint)icol0, col1 = (uint)icol1;
 
     int d_row = dy + (int)row;
@@ -260,6 +291,14 @@ static inline void gfx_blit_region_rounded(fb_info *dst, int dx, int dy,
         continue;
       dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
           src->ptr[fy * src_pitch_px + (uint)sx + col];
+    }
+  }
+}
+
+static inline void gfx_img(fb_info *fb, uint x, uint y, bitmap *img) {
+  for (uint yy = y; yy < y + img->height; yy++) {
+    for (uint xx = x; xx < x + img->width; xx++) {
+      gfx_pixel_blend(fb, xx, yy, img->data[(yy - y) * img->width + (xx - x)]);
     }
   }
 }

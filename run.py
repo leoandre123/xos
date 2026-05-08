@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+import argparse
+import glob
+import os
+import shutil
+import subprocess
+import sys
+
+import rich.box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.rule import Rule
+from rich.table import Table
+
+console = Console(highlight=False)
+
+ROOT       = os.path.dirname(os.path.abspath(__file__))
+BOOTLOADER = os.path.join(ROOT, "bootloader/uefi")
+KERNEL     = os.path.join(ROOT, "kernel")
+USER       = os.path.join(ROOT, "user")
+BUILD      = os.path.join(ROOT, "build")
+
+EFI_PART_LBA  = 2048
+DATA_PART_LBA = 34816
+EFI_BYTE      = EFI_PART_LBA  * 512
+DATA_BYTE     = DATA_PART_LBA * 512
+
+
+def run(*args, cwd=None, input=None, label=None, quiet=False):
+    str_args = [str(a) for a in args]
+    label = label or os.path.basename(str_args[0])
+
+    def _run():
+        result = subprocess.run(str_args, capture_output=True, cwd=cwd, input=input)
+        if result.returncode != 0:
+            output = (result.stdout + result.stderr).decode(errors="replace").strip()
+            console.print(Panel(output, title=f"[red bold]✗  {label}[/red bold]", border_style="red"))
+            sys.exit(result.returncode)
+
+    if quiet:
+        _run()
+    else:
+        with console.status(f"[cyan]{label}[/cyan]", spinner="dots"):
+            _run()
+
+
+def section(title):
+    console.print()
+    console.rule(f"[bold white]{title}[/bold white]", style="dim white")
+    console.print()
+
+
+def ok(msg):
+    console.print(f"  [bold green]✓[/bold green]  {msg}")
+
+
+def find_ovmf():
+    code  = glob.glob("/usr/share/**/OVMF_CODE*.fd", recursive=True)
+    vars_ = glob.glob("/usr/share/**/OVMF_VARS*.fd", recursive=True)
+    if not code or not vars_:
+        console.print(Panel("[red]Could not find OVMF firmware[/red]", border_style="red"))
+        sys.exit(1)
+    return code[0], vars_[0]
+
+
+def build():
+    section("Build")
+
+    run("make", "clean", cwd=KERNEL,     label="kernel clean")
+    run("make",          cwd=KERNEL,     label="kernel build")
+    ok("Kernel")
+
+    run("make", "clean", cwd=BOOTLOADER, label="bootloader clean")
+    run("make",          cwd=BOOTLOADER, label="bootloader build")
+    ok("Bootloader")
+
+    if not shutil.which("mcopy"):
+        console.print("[red]ERROR: mtools not found. Run: sudo apt install mtools[/red]")
+        sys.exit(1)
+
+    app_dirs = sorted(
+        d for d in glob.glob(os.path.join(USER, "apps", "*", ""))
+        if os.path.isfile(os.path.join(d, "Makefile"))
+    )
+
+    with Progress(SpinnerColumn(), TextColumn("[cyan]{task.description}"),
+                  BarColumn(), MofNCompleteColumn(), TimeElapsedColumn(),
+                  console=console) as progress:
+        task = progress.add_task("User apps", total=len(app_dirs))
+        for app_dir in app_dirs:
+            name = os.path.basename(os.path.dirname(app_dir))
+            progress.update(task, description=f"[cyan]Building [bold]{name}[/bold]")
+            run("make", "clean", cwd=app_dir, quiet=True)
+            run("make",          cwd=app_dir, quiet=True)
+            progress.advance(task)
+
+    ok(f"{len(app_dirs)} user app(s)")
+
+
+def prepare_esp():
+    section("Artifacts")
+
+    esp = os.path.join(BUILD, "esp")
+    shutil.rmtree(esp, ignore_errors=True)
+    os.makedirs(os.path.join(esp, "EFI", "BOOT"))
+    shutil.copy(os.path.join(BOOTLOADER, "build/BOOTX64.EFI"), os.path.join(esp, "EFI/BOOT/BOOTX64.EFI"))
+    shutil.copy(os.path.join(KERNEL,     "build/kernel.bin"),  os.path.join(esp, "kernel.bin"))
+
+    table = Table(box=rich.box.ROUNDED, border_style="dim", header_style="bold magenta", pad_edge=False)
+    table.add_column("File",  style="cyan")
+    table.add_column("Size",  justify="right", style="green")
+    table.add_column("Path",  style="dim")
+
+    for path in [os.path.join(BOOTLOADER, "build/BOOTX64.EFI"),
+                 os.path.join(KERNEL,     "build/kernel.bin")]:
+        table.add_row(os.path.basename(path),
+                      f"{os.path.getsize(path) / 1024:.1f} KB",
+                      os.path.relpath(path, ROOT))
+
+    console.print(table)
+
+
+def deploy_pxe(tftp_root):
+    section("PXE Deploy")
+    os.makedirs(os.path.join(tftp_root, "EFI", "BOOT"), exist_ok=True)
+    shutil.copy(os.path.join(BOOTLOADER, "build/BOOTX64.EFI"), os.path.join(tftp_root, "EFI/BOOT/BOOTX64.EFI"))
+    shutil.copy(os.path.join(KERNEL,     "build/kernel.bin"),  os.path.join(tftp_root, "kernel.bin"))
+    console.print(f"  [cyan]BOOTX64.EFI[/cyan]  →  {tftp_root}/EFI/BOOT/")
+    console.print(f"  [cyan]kernel.bin[/cyan]   →  {tftp_root}/")
+    console.print(f"\n[dim]Tftpd64 boot file: EFI/BOOT/BOOTX64.EFI[/dim]")
+
+
+def create_image(image):
+    section("Disk Image")
+
+    run("dd", "if=/dev/zero", f"of={image}", "bs=1M", "count=128", "status=none",
+        label="Zeroing 128 MB image")
+
+    gpt = (
+        f"label: gpt\n"
+        f"start={EFI_PART_LBA},  size={DATA_PART_LBA - EFI_PART_LBA},"
+        f" type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n"
+        f"start={DATA_PART_LBA}, size=+,"
+        f" type=0FC63DAF-8483-4772-8E79-3D69D8477DE4\n"
+    )
+    run("sfdisk", image, input=gpt.encode(), label="Writing GPT")
+    ok("Partition table")
+
+    run("mformat", "-i", f"{image}@@{EFI_BYTE}", "-F", "-v", "EFI", "::", label="Formatting EFI partition")
+    run("mmd",     "-i", f"{image}@@{EFI_BYTE}", "::/EFI")
+    run("mmd",     "-i", f"{image}@@{EFI_BYTE}", "::/EFI/BOOT")
+    run("mcopy",   "-i", f"{image}@@{EFI_BYTE}",
+        os.path.join(BOOTLOADER, "build/BOOTX64.EFI"), "::/EFI/BOOT/BOOTX64.EFI",
+        label="Copying BOOTX64.EFI")
+    run("mcopy",   "-i", f"{image}@@{EFI_BYTE}",
+        os.path.join(KERNEL, "build/kernel.bin"), "::kernel.bin",
+        label="Copying kernel.bin")
+    ok("EFI partition")
+
+
+def populate_data(image, init_mode):
+    run("mformat", "-i", f"{image}@@{DATA_BYTE}", "-F", "-v", "XOS", "::",
+        label="Formatting data partition")
+
+    elfs   = sorted(glob.glob(os.path.join(USER, "apps", "*", "build", "*.elf")))
+    assets = sorted(glob.glob(os.path.join(ROOT, "rootfs", "*")))
+    total  = len(elfs) + 1 + len(assets)
+
+    with Progress(SpinnerColumn(), TextColumn("[cyan]{task.description}"),
+                  BarColumn(), MofNCompleteColumn(), TimeElapsedColumn(),
+                  console=console) as progress:
+        task = progress.add_task("Data partition", total=total)
+
+        for elf in elfs:
+            name = os.path.basename(elf)
+            progress.update(task, description=f"[cyan]Copying [bold]{name}[/bold]")
+            subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", elf, f"::/{name}"],
+                           capture_output=True, check=True)
+            progress.advance(task)
+
+        progress.update(task, description="[cyan]Writing [bold]init[/bold]")
+        subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", "-", "::init"],
+                       input=init_mode.encode(), capture_output=True, check=True)
+        progress.advance(task)
+
+        for entry in assets:
+            name = os.path.basename(entry)
+            progress.update(task, description=f"[cyan]Copying [bold]{name}[/bold]")
+            flags = ["-s"] if os.path.isdir(entry) else []
+            subprocess.run(["mcopy", *flags, "-i", f"{image}@@{DATA_BYTE}", entry, f"::{name}"],
+                           capture_output=True, check=True)
+            progress.advance(task)
+
+    ok("Data partition")
+
+
+def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug):
+    section("QEMU")
+
+    drives   = ["-drive", f"if=pflash,format=raw,readonly=on,file={code_fd}",
+                "-drive", f"if=pflash,format=raw,file={ovmf_vars}"]
+    usb_devs = ["-device", "usb-kbd,bus=xhci.0"]
+
+    if drive_mode == "usb":
+        drives   += ["-drive", f"id=usbdrive,format=raw,file={image},if=none"]
+        usb_devs += ["-device", "usb-storage,bus=xhci.0,drive=usbdrive"]
+    else:
+        drives += ["-drive", f"format=raw,file={image}"]
+
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="dim")
+    info.add_column(style="bold cyan")
+    info.add_row("Drive", drive_mode)
+    info.add_row("Image", os.path.basename(image))
+    info.add_row("RAM",   "256 MB")
+    if debug:
+        info.add_row("Debug", "GDB on :1234")
+
+    console.print(Panel(info, title="[bold green]Launching QEMU[/bold green]", border_style="green"))
+    console.print()
+
+    cmd = ["qemu-system-x86_64", "-m", "256M", *drives,
+           "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
+           "-device", "qemu-xhci,id=xhci", *usb_devs,
+           "-object", "filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap",
+           "-serial", "stdio", "-d", "int,cpu_reset", "-D", "/tmp/qemu.log"]
+    if debug:
+        cmd += ["-s", "-S"]
+
+    subprocess.run(cmd, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="XOS build & run")
+    parser.add_argument("--desktop",     dest="init_mode",  action="store_const", const="dafne")
+    parser.add_argument("--terminal",    dest="init_mode",  action="store_const", const="terminal")
+    parser.add_argument("--usb",         dest="drive_mode", action="store_const", const="usb")
+    parser.add_argument("--ata",         dest="drive_mode", action="store_const", const="ata")
+    parser.add_argument("--debug", "-d", action="store_true")
+    parser.add_argument("--pxe",         action="store_true")
+    parser.set_defaults(init_mode="terminal", drive_mode="ata")
+    args = parser.parse_args()
+
+    tftp_root = os.environ.get("PXE_ROOT", "/mnt/c/tftpboot")
+    os.makedirs(BUILD, exist_ok=True)
+
+    console.print(Panel(
+        "[bold cyan]XOS Build System[/bold cyan]",
+        subtitle=f"[dim]drive=[bold]{args.drive_mode}[/bold]  init=[bold]{args.init_mode}[/bold][/dim]",
+        border_style="cyan",
+        padding=(1, 4),
+    ))
+
+    build()
+    prepare_esp()
+
+    code_fd, vars_fd = find_ovmf()
+    shutil.copy(vars_fd, os.path.join(BUILD, "OVMF_VARS.fd"))
+    ovmf_vars = os.path.join(BUILD, "OVMF_VARS.fd")
+
+    if args.pxe:
+        deploy_pxe(tftp_root)
+        return
+
+    image = (os.path.join(BUILD, "usb.img") if args.drive_mode == "usb"
+             else os.path.join(ROOT, "disk.bin"))
+
+    create_image(image)
+    populate_data(image, args.init_mode)
+    launch_qemu(image, args.drive_mode, code_fd, ovmf_vars, args.debug)
+
+
+if __name__ == "__main__":
+    main()

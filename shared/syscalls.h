@@ -23,6 +23,8 @@
 /* FILES 80-99*/
 #define SYS_FILE_OPEN    80 // arg1=path, arg2=option returns handle
 #define SYS_FILE_CLOSE   81 // arg1=handle
+#define SYS_FILE_READ    82 // arg1=handle, arg2=buf, arg3=count
+#define SYS_FILE_SIZE    83 // arg1=handle
 #define SYS_FILE_READDIR 90 // arg1=path, arg2=buf, arg3=max_count, returns count read
 
 /* NETWORKING 100-119 */

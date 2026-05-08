@@ -9,6 +9,7 @@
 #include "filesystem/filesystem.h"
 #include "graphics/console.h"
 #include "graphics/gfx.h"
+#include "graphics/image.h"
 #include "io/ata.h"
 #include "io/e1000.h"
 #include "io/keyboard.h"
@@ -210,6 +211,15 @@ void kernel_main() {
   time_init();
 
   logging_set_screen_logging(false);
+
+  gfx_clear(RGB(82, 50, 49));
+  bitmap *logo = img_load("/logo.lbm");
+  gfx_img(100, 100, logo);
+  kfree(logo);
+
+  ksleep_ms(4000);
+
+  klogf(LOG_INFO, "Starting scheduler...");
   scheduler_run();
 
   klogf(LOG_INFO, "Goodbye from kernel!");

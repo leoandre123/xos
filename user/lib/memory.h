@@ -24,3 +24,8 @@ static void inline memcpy8(ubyte *dst, ubyte *src, ulong count) {
     dst[i] = src[i];
   }
 }
+static void inline memcpy(void *dst, const void *src, ulong count) {
+  for (ulong i = 0; i < count; i++) {
+    ((ubyte *)dst)[i] = ((ubyte *)src)[i];
+  }
+}

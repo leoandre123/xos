@@ -309,7 +309,7 @@ int fat32_readdir(const char *path, file_dirent *out, int max) {
             char ch = entries[j].name[k];
             if (ch != ' ')
               *n++ = ch;
-            if (k == 7)
+            if (k == 7 && entries[j].name[8] != ' ')
               *n++ = '.';
           }
           *n = '\0';

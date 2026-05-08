@@ -62,16 +62,16 @@ static rect cursor_rect(int x, int y) {
 }
 
 static void render_title_bar(fb_info *dst, window *w) {
-  uint bar = w->focused ? 0x005294E2 : 0x003A3A3A;
-  uint min_bg = w->hover_minimize ? 0x00909090 : 0x00708090;
-  uint cls_bg = w->hover_close ? 0x00FF4444 : 0x00CC0000;
+  uint bar = w->focused ? 0xff5294E2 : 0xff3A3A3A;
+  uint min_bg = w->hover_minimize ? 0xff909090 : 0xff708090;
+  uint cls_bg = w->hover_close ? 0xffFF4444 : 0xffCC0000;
   int tw = (int)w->surface.width;
   gfx_rect(dst, w->x, w->y, tw, WINDOW_TITLE_BAR_HEIGHT, bar);
-  gfx_str(dst, w->x + 6, w->y + 5, w->title, 0x00FFFFFF);
+  gfx_str(dst, w->x + 6, w->y + 5, w->title, 0xffFFFFFF);
   gfx_rect(dst, w->x + tw - 50, w->y + 2, 21, 21, min_bg);
-  gfx_str(dst, w->x + tw - 47, w->y + 5, "_", 0x00FFFFFF);
+  gfx_str(dst, w->x + tw - 47, w->y + 5, "_", 0xffFFFFFF);
   gfx_rect(dst, w->x + tw - 25, w->y + 2, 21, 21, cls_bg);
-  gfx_str(dst, w->x + tw - 22, w->y + 5, "X", 0x00FFFFFF);
+  gfx_str(dst, w->x + tw - 22, w->y + 5, "X", 0xffFFFFFF);
   w->title_dirty = 0;
 }
 

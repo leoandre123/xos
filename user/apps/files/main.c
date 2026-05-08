@@ -1,3 +1,4 @@
+#include "image.h"
 #include "mouse.h"
 #include "rect.h"
 #include "string.h"
@@ -93,6 +94,8 @@ int main(void) {
   window_event ev;
   ui_ctx ctx;
 
+  bitmap *folder_icon = img_load("/sys/icons/folder.lbm");
+
   while (1) {
     while (!window_poll_event(wh, &ev))
       sys_yield();
@@ -103,8 +106,7 @@ int main(void) {
       ctx.my = (short)ev.mouse_event.y;
       ctx.clicked = (ev.mouse_event.buttons & MOUSE_BTN_LEFT) != 0;
       break;
-    default:
-      break;
+    default: break;
     }
 
     window_begin_paint(wh, &ctx);
@@ -184,6 +186,7 @@ int main(void) {
       // icon + name
       if (g_entries[i].is_dir) {
         ui_str(&ctx, 8, y + 3, "[+]", 0x0089B4FA);
+        // ui_img(&ctx, 8, y + 3, folder_icon);
         ui_str(&ctx, 36, y + 3, g_entries[i].name, 0x0089B4FA);
       } else {
         ui_str(&ctx, 8, y + 3, "   ", 0x00CDD6F4);

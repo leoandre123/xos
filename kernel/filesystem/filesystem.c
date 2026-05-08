@@ -66,7 +66,15 @@ int fs_init(BootDevice *boot_device) {
     if (ata_ok) {
       klogf(LOG_INFO, "ATA initialized...");
       fat32_set_block_read(ata_read);
-      fat32_init(0);
+      ubyte gpt_buf[512];
+      if (ata_read(2, 1, gpt_buf)) {
+        uint part2_lba = *(uint *)(gpt_buf + 128 + 32);
+        klogf(LOG_INFO, "ATA data partition LBA: %u", part2_lba);
+        fat32_init(part2_lba);
+      } else {
+        klogf(LOG_WARNING, "Failed to read GPT from ATA, falling back to LBA 0");
+        fat32_init(0);
+      }
       klogf(LOG_INFO, "FAT32 initialized...");
       fat32_print_root();
       return 0;

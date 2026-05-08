@@ -1,5 +1,6 @@
 #pragma once
 #include "gfx.h"
+#include "image.h"
 #include "rect.h"
 #include "types.h"
 
@@ -19,3 +20,5 @@ void ui_rounded_rect(ui_ctx *ctx, rect rc, int r, int color);
 
 bool ui_button(ui_ctx *ctx, int x, int y, int w, int h, const char *label);
 bool ui_checkbox(ui_ctx *ctx, int x, int y, const char *label, bool *checked);
+
+// void ui_img(ui_ctx *ctx, int x, int y, bitmap *img);

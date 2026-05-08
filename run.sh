@@ -12,18 +12,19 @@ ESP_DIR="$BUILD_DIR/esp"
 # ── Parse flags ───────────────────────────────────────────────────────────────
 INIT_MODE="terminal"
 DEBUG_FLAGS=""
-USB_MODE=false
+DRIVE_MODE="ata"
 PXE_MODE=false
 # Tftpd64 root on Windows — override with PXE_ROOT=/your/path ./run.sh --pxe
 TFTP_ROOT="${PXE_ROOT:-/mnt/c/tftpboot}"
 
 for arg in "$@"; do
     case "$arg" in
-        --desktop)  INIT_MODE="dafne" ;;
-        --terminal) INIT_MODE="terminal" ;;
-        --debug|-d) DEBUG_FLAGS="-s -S" ;;
-        --usb)      USB_MODE=true ;;
-        --pxe)      PXE_MODE=true ;;
+    --desktop) INIT_MODE="dafne" ;;
+    --terminal) INIT_MODE="terminal" ;;
+    --debug | -d) DEBUG_FLAGS="-s -S" ;;
+    --usb) DRIVE_MODE="usb" ;;
+    --ata) DRIVE_MODE="ata" ;;
+    --pxe) PXE_MODE=true ;;
     esac
 done
 
@@ -82,7 +83,7 @@ if $PXE_MODE; then
     echo "==== Deploying to TFTP root: $TFTP_ROOT ===="
     mkdir -p "$TFTP_ROOT/EFI/BOOT"
     cp "$BOOTLOADER_DIR/build/BOOTX64.EFI" "$TFTP_ROOT/EFI/BOOT/BOOTX64.EFI"
-    cp "$KERNEL_DIR/build/kernel.bin"      "$TFTP_ROOT/kernel.bin"
+    cp "$KERNEL_DIR/build/kernel.bin" "$TFTP_ROOT/kernel.bin"
     echo "Copied:"
     echo "  BOOTX64.EFI → $TFTP_ROOT/EFI/BOOT/BOOTX64.EFI"
     echo "  kernel.bin  → $TFTP_ROOT/kernel.bin"
@@ -93,64 +94,50 @@ if $PXE_MODE; then
 fi
 
 # ── Disk setup ────────────────────────────────────────────────────────────────
-echo "  Init mode: $INIT_MODE"
+# GPT layout shared by both ATA and USB modes:
+#   Partition 1 (EFI System, LBA 2048–34815): FAT32 with BOOTX64.EFI + kernel.bin
+#   Partition 2 (Data,       LBA 34816–end):  FAT32 with user apps + rootfs
+EFI_PART_LBA=2048
+DATA_PART_LBA=34816
+EFI_BYTE=$((EFI_PART_LBA * 512))
+DATA_BYTE=$((DATA_PART_LBA * 512))
 
 if $USB_MODE; then
-    # ── USB image mode ────────────────────────────────────────────────────────
-    # Create a 128 MB GPT image with two partitions:
-    #   Partition 1 (EFI System, LBA 2048–34815): FAT32 with BOOTX64.EFI + kernel.bin
-    #   Partition 2 (Data,       LBA 34816–end):  FAT32 with user apps + /init
-    #
-    # OVMF boots from USB, finds the EFI partition, loads BOOTX64.EFI.
-    # The bootloader's DeviceHandle is then a USB device → boot_device=1.
-    # The kernel reads the GPT at LBA 2 to find partition 2's start LBA.
-    # ─────────────────────────────────────────────────────────────────────────
+    IMAGE="$BUILD_DIR/usb.img"
     echo "==== Creating USB image ===="
-    USB_IMAGE="$BUILD_DIR/usb.img"
-    EFI_PART_LBA=2048
-    DATA_PART_LBA=34816
+else
+    IMAGE="$ROOT_DIR/disk.bin"
+    echo "==== Creating ATA disk image ===="
+fi
+echo "  Init mode: $INIT_MODE"
 
-    dd if=/dev/zero of="$USB_IMAGE" bs=1M count=128 status=none
+dd if=/dev/zero of="$IMAGE" bs=1M count=128 status=none
 
-    # Write a real GPT so OVMF can find the EFI System Partition
-    sfdisk "$USB_IMAGE" <<SFDISK_EOF
+sfdisk "$IMAGE" <<SFDISK_EOF
 label: gpt
 start=$EFI_PART_LBA,  size=$((DATA_PART_LBA - EFI_PART_LBA)), type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 start=$DATA_PART_LBA, size=+,                                  type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
 SFDISK_EOF
 
-    EFI_BYTE=$((EFI_PART_LBA * 512))
-    DATA_BYTE=$((DATA_PART_LBA * 512))
+# Format and populate EFI partition
+mformat -i "$IMAGE"@@"$EFI_BYTE" -F -v "EFI" ::
+mmd -i "$IMAGE"@@"$EFI_BYTE" ::/EFI
+mmd -i "$IMAGE"@@"$EFI_BYTE" ::/EFI/BOOT
+mcopy -i "$IMAGE"@@"$EFI_BYTE" "$BOOTLOADER_DIR/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "$IMAGE"@@"$EFI_BYTE" "$KERNEL_DIR/build/kernel.bin" ::kernel.bin
 
-    # Format and populate EFI partition
-    mformat -i "$USB_IMAGE"@@"$EFI_BYTE" -F -v "EFI" ::
-    mmd    -i "$USB_IMAGE"@@"$EFI_BYTE" ::/EFI
-    mmd    -i "$USB_IMAGE"@@"$EFI_BYTE" ::/EFI/BOOT
-    mcopy  -i "$USB_IMAGE"@@"$EFI_BYTE" "$BOOTLOADER_DIR/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-    mcopy  -i "$USB_IMAGE"@@"$EFI_BYTE" "$KERNEL_DIR/build/kernel.bin"      ::kernel.bin
-
-    # Format and populate data partition
-    mformat -i "$USB_IMAGE"@@"$DATA_BYTE" -F -v "XOS" ::
-    echo "==== Copying user apps to USB image ===="
-    for elf in "$USER_DIR/apps"/*/build/*.elf; do
-        [ -f "$elf" ] || continue
-        elf_name="$(basename "$elf")"
-        echo "  Copying $elf_name..."
-        mcopy -D o -i "$USB_IMAGE"@@"$DATA_BYTE" "$elf" "::/$elf_name"
-    done
-    echo -n "$INIT_MODE" | mcopy -D o -i "$USB_IMAGE"@@"$DATA_BYTE" - "::init"
-
-else
-    # ── Normal ATA disk mode ──────────────────────────────────────────────────
-    echo "==== Copying user apps to disk ===="
-    for elf in "$USER_DIR/apps"/*/build/*.elf; do
-        [ -f "$elf" ] || continue
-        elf_name="$(basename "$elf")"
-        echo "  Copying $elf_name..."
-        mcopy -D o -i "$ROOT_DIR/disk.bin" "$elf" "::/$elf_name"
-    done
-    echo -n "$INIT_MODE" | mcopy -D o -i "$ROOT_DIR/disk.bin" - "::init"
-fi
+# Format and populate data partition
+mformat -i "$IMAGE"@@"$DATA_BYTE" -F -v "XOS" ::
+echo "==== Copying user apps ===="
+for elf in "$USER_DIR/apps"/*/build/*.elf; do
+    [ -f "$elf" ] || continue
+    elf_name="$(basename "$elf")"
+    echo "  Copying $elf_name..."
+    mcopy -i "$IMAGE"@@"$DATA_BYTE" "$elf" "::/$elf_name"
+done
+echo -n "$INIT_MODE" | mcopy -i "$IMAGE"@@"$DATA_BYTE" - "::init"
+echo "==== Copying rootfs ===="
+mcopy -s -i "$IMAGE"@@"$DATA_BYTE" "$ROOT_DIR/rootfs/"* "::"
 
 # ── QEMU ──────────────────────────────────────────────────────────────────────
 echo "==== Starting QEMU ===="
@@ -167,14 +154,10 @@ QEMU_DRIVES=(
 QEMU_USB_DEVS=(-device usb-kbd,bus=xhci.0)
 
 if $USB_MODE; then
-    # No IDE ESP — EFI partition lives on the USB image.
-    # OVMF enumerates USB storage, finds the EFI partition, and boots from it.
-    # The bootloader's DeviceHandle is then a USB device → boot_device=1 in BootInfo.
-    QEMU_DRIVES+=(-drive "id=usbdrive,format=raw,file=$USB_IMAGE,if=none")
+    QEMU_DRIVES+=(-drive "id=usbdrive,format=raw,file=$IMAGE,if=none")
     QEMU_USB_DEVS+=(-device usb-storage,bus=xhci.0,drive=usbdrive)
 else
-    QEMU_DRIVES+=(-drive "format=raw,file=fat:rw:$ESP_DIR")
-    QEMU_DRIVES+=(-drive "format=raw,file=$ROOT_DIR/disk.bin")
+    QEMU_DRIVES+=(-drive "format=raw,file=$IMAGE")
 fi
 
 qemu-system-x86_64 \

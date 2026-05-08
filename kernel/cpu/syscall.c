@@ -277,13 +277,17 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     return time_now();
 
   case SYS_FILE_OPEN:
-    panic("Not implemented");
-    return 0;
+    return (ulong)file_open((const char *)arg1);
   case SYS_FILE_CLOSE:
-    panic("Not implemented");
+    file_close((file_handle)arg1);
     return 0;
   case SYS_FILE_READDIR:
     return file_readdir((const char *)arg1, (file_dirent *)arg2, arg3);
+  case SYS_FILE_READ:
+    return file_read((file_handle)arg1, (void *)arg2, arg3);
+
+  case SYS_FILE_SIZE:
+    return ((file_handle)arg1)->size;
 
   case SYS_SOCKET_CONNECT:
     return socket_tcp_client((ipv4_addr)(uint)arg1, (arg2), 0).value;
