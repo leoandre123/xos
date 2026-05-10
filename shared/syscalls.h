@@ -18,6 +18,7 @@
 #define SYS_READ_MOUSE    14 // non-blocking; returns (1<<48)|(buttons<<32)|(y<<16)|x or 0
 #define SYS_WRITE_HEX     20
 #define SYS_TIME          40
+#define SYS_VBLANK_WAIT   41 // blocking wating for vsync, no args
 /* PROCESSES 60-79 */
 
 /* FILES 80-99*/

@@ -2,8 +2,8 @@
 #include "graphics/console.h"
 #include "graphics/gfx.h"
 #include "io/keyboard.h"
-#include "io/keys.h"
 #include "io/serial.h"
+#include "keys.h"
 #include "memory/heap.h"
 #include "memory/vmm.h"
 

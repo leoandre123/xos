@@ -33,6 +33,7 @@ typedef struct BootInfo {
   ulong memory_map_desc_size;
   uint memory_map_desc_version;
   BootDevice boot_device;
+  bool fast_boot;
 } BootInfo;
 
 #endif

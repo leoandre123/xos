@@ -1,88 +1,42 @@
 #include "retained_ui.h"
 #include "fb_info.h"
-#include "font.h"
-#include "gfx.h"
-#include "math.h"
-#include "memory.h"
-#include "mouse.h"
-#include "string.h"
+#include "keyboard.h"
+#include "syscall.h"
 #include "types.h"
 #include "window/ui/retained_ui_internal.h"
 #include "window_event.h"
 
+/*
+ * INCLUDE COMPONENTS
+ */
+#include "components/ui_button.inc"
+#include "components/ui_grid.inc"
+#include "components/ui_hstack.inc"
+#include "components/ui_img.inc"
+#include "components/ui_label.inc"
+#include "components/ui_text_field.inc"
+#include "components/ui_vstack.inc"
+
 ui_node g_root = {0};
 fb_info *fb;
-
 ui_node g_nodes[100];
 int next_idx = 0;
+ui_node *g_focused = 0;
+
+static bool s_perf = false;
+int s_fps = 0, s_frame_count = 0, s_dirty_count = 0;
+static ulong s_last_sec = 0;
+
+static inline ulong rdtsc(void) {
+  ulong lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return (hi << 32) | lo;
+}
+
+void ui_set_perf(bool on) { s_perf = on; }
 
 static ui_size ps_root(ui_node *node) {
   return WITH_PADDING(0, 0, node->padding);
-}
-static ui_size ps_button(ui_node *node) {
-  ushort w = strlen(node->button.text) * FONT_GLYPH_WIDTH;
-  ushort h = FONT_GLYPH_HEIGHT;
-  return WITH_PADDING(w, h, node->padding);
-}
-static ui_size ps_label(ui_node *node) {
-  ushort w = strlen(node->label.text) * FONT_GLYPH_WIDTH;
-  ushort h = FONT_GLYPH_HEIGHT;
-  return WITH_PADDING(w, h, node->padding);
-}
-static ui_size ps_vstack(ui_node *node) {
-  ushort max_w = 0;
-  ushort h = 0;
-
-  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    max_w = MAX(max_w, child->preferred_size.w);
-    h += child->preferred_size.h + node->stack.gap;
-  }
-  if (h > 0)
-    h -= node->stack.gap;
-
-  return WITH_PADDING(max_w, h, node->padding);
-}
-static ui_size ps_hstack(ui_node *node) {
-  ushort max_h = 0;
-  ushort w = 0;
-
-  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    max_h = MAX(max_h, child->preferred_size.h);
-    w += child->preferred_size.w + node->stack.gap;
-  }
-  if (w > 0)
-    w -= node->stack.gap;
-
-  return WITH_PADDING(w, max_h, node->padding);
-}
-static ui_size ps_grid(ui_node *node) {
-  int cols = node->grid.cols;
-  int gap = node->grid.gap;
-
-  ushort col_widths[32] = {0};
-  ushort row_heights[32] = {0};
-
-  int i = 0;
-  for (ui_node *child = node->first_child; child;
-       child = child->next_sibling, i++) {
-    int col = i % cols;
-    int row = i / cols;
-    col_widths[col] = MAX(col_widths[col], child->preferred_size.w);
-    row_heights[row] = MAX(row_heights[row], child->preferred_size.h);
-  }
-
-  int rows = (i + cols - 1) / cols;
-  ushort w = 0, h = 0;
-  for (int c = 0; c < cols; c++)
-    w += col_widths[c] + gap;
-  for (int r = 0; r < rows; r++)
-    h += row_heights[r] + gap;
-
-  return WITH_PADDING(w > 0 ? w - gap : 0, h > 0 ? h - gap : 0, node->padding);
-}
-static ui_size ps_img(ui_node *node) {
-  return WITH_PADDING(node->img.img->width, node->img.img->height,
-                      node->padding);
 }
 
 static void layout_root(ui_node *node, ui_size size, ui_pos pos) {
@@ -93,117 +47,27 @@ static void layout_root(ui_node *node, ui_size size, ui_pos pos) {
   }
 }
 
-static void layout_vstack(ui_node *node, ui_size size, ui_pos pos) {
-  node->calculated_size = size;
-  node->calculated_pos = pos;
+ui_node *create_node(ui_node *parent) {
+  ui_node *node = &g_nodes[next_idx++];
+  node->parent = parent;
+  node->visible = true;
+  node->dirty = true;
+  node->expand = false;
+  node->interactive = false;
+  node->first_child = 0;
+  node->next_sibling = 0;
 
-  ui_pos child_pos = pos;
-  ui_size child_size = size;
-
-  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    switch (node->stack.align_children) {
-    case ALIGN_START:
-      child_pos.x = pos.x;
-      child_size = child->preferred_size;
-      break;
-    case ALIGN_END:
-      child_pos.x = pos.x + size.w - child->preferred_size.w;
-      child_size = child->preferred_size;
-      break;
-    case ALIGN_CENTER:
-      child_pos.x = pos.x + (size.w - child->preferred_size.w) / 2;
-      child_size = child->preferred_size;
-      break;
-    case ALIGN_STRETCH:
-      child_pos.x = pos.x;
-      child_size.w = size.w;
-      child_size.h = child->preferred_size.h;
-      break;
+  if (parent->first_child) {
+    ui_node *child;
+    for (child = parent->first_child; child->next_sibling;
+         child = child->next_sibling) {
     }
-    child->layout(child, child_size, child_pos);
-    child_pos.y += child->preferred_size.h + node->stack.gap;
-  }
-}
-static void layout_hstack(ui_node *node, ui_size size, ui_pos pos) {
-  node->calculated_size = size;
-  node->calculated_pos = pos;
-}
-static void layout_grid(ui_node *node, ui_size size, ui_pos pos) {
-  node->calculated_size = size;
-  node->calculated_pos = pos;
-
-  int cols = node->grid.cols;
-  int gap = node->grid.gap;
-
-  ushort col_widths[32] = {0};
-  ushort row_heights[32] = {0};
-
-  int i = 0;
-  for (ui_node *child = node->first_child; child;
-       child = child->next_sibling, i++) {
-    col_widths[i % cols] = MAX(col_widths[i % cols], child->preferred_size.w);
-    row_heights[i / cols] = MAX(row_heights[i / cols], child->preferred_size.h);
+    child->next_sibling = node;
+  } else {
+    parent->first_child = node;
   }
 
-  i = 0;
-  for (ui_node *child = node->first_child; child;
-       child = child->next_sibling, i++) {
-    int col = i % cols;
-    int row = i / cols;
-
-    ui_pos child_pos = pos;
-    for (int c = 0; c < col; c++)
-      child_pos.x += col_widths[c] + gap;
-    for (int r = 0; r < row; r++)
-      child_pos.y += row_heights[r] + gap;
-
-    child->layout(child, (ui_size){col_widths[col], row_heights[row]},
-                  child_pos);
-  }
-}
-static void draw_node_bg(ui_node *node) {
-  if (node->bg_color)
-    gfx_rect(fb, node->calculated_pos.x, node->calculated_pos.y,
-             node->calculated_size.w, node->calculated_size.h,
-             node->hovered ? node->bg_hover : node->bg_color);
-}
-
-static inline void draw_node(ui_node *node) {
-  draw_node_bg(node);
-  node->draw(node);
-}
-
-static void draw_root(ui_node *node) {
-  if (node->first_child)
-    draw_node(node->first_child);
-}
-static void draw_button(ui_node *node) {
-  gfx_rect(fb, node->calculated_pos.x, node->calculated_pos.y,
-           node->calculated_size.w, node->calculated_size.h,
-           node->hovered ? node->bg_hover : node->bg_color);
-  gfx_str(fb, node->calculated_pos.x + node->padding,
-          node->calculated_pos.y + node->padding, node->button.text,
-          node->button.color);
-}
-
-static void draw_label(ui_node *node) {
-  gfx_str(fb, node->calculated_pos.x + node->padding,
-          node->calculated_pos.y + node->padding, node->label.text,
-          node->label.color);
-}
-
-static void draw_grid(ui_node *node) {
-  for (ui_node *child = node->first_child; child; child = child->next_sibling)
-    draw_node(child);
-}
-
-static void draw_stack(ui_node *node) {
-  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    draw_node(child);
-  }
-}
-static void draw_img(ui_node *node) {
-  gfx_img(fb, node->calculated_pos.x, node->calculated_pos.y, node->img.img);
+  return node;
 }
 
 ui_node *ui_create_root(fb_info *f) {
@@ -211,75 +75,11 @@ ui_node *ui_create_root(fb_info *f) {
   g_root.parent = 0;
   g_root.visible = true;
   g_root.type = UI_ROOT;
-  g_root.draw = draw_root;
+  g_root.draw = 0;
   g_root.layout = layout_root;
   g_root.get_preferred_size = ps_root;
+  g_root.dirty = true;
   return &g_root;
-}
-
-ui_node *rui_button(ui_node *parent, const char *title) {
-  ui_node *node = create_node(parent);
-  node->type = UI_BUTTON;
-  node->get_preferred_size = ps_button;
-  node->layout = layout_simple;
-  node->draw = draw_button;
-  node->padding = 5;
-  node->interactive = true;
-  node->bg_color = 0xff505080;
-  node->bg_hover = 0xff303050;
-  node->button.color = 0x00ffffff;
-  memcpy(node->button.text, title, strlen(title));
-  return node;
-}
-
-ui_node *ui_vstack(ui_node *parent, int gap, ui_align align_children) {
-  ui_node *node = create_node(parent);
-  node->type = UI_VSTACK;
-  node->get_preferred_size = ps_vstack;
-  node->layout = layout_vstack;
-  node->draw = draw_stack;
-  node->stack.gap = gap;
-  node->stack.align_children = align_children;
-  return node;
-}
-ui_node *ui_hstack(ui_node *parent, int gap) {
-  ui_node *node = create_node(parent);
-  node->type = UI_HSTACK;
-  node->get_preferred_size = ps_hstack;
-  node->layout = layout_hstack;
-  node->draw = draw_stack;
-  node->stack.gap = gap;
-  return node;
-}
-ui_node *ui_grid(ui_node *parent, int cols, int rows, int gap) {
-  ui_node *node = create_node(parent);
-  node->type = UI_GRID;
-  node->get_preferred_size = ps_grid;
-  node->layout = layout_grid;
-  node->draw = draw_grid;
-  node->grid.cols = cols;
-  node->grid.rows = rows;
-  node->grid.gap = gap;
-  return node;
-}
-
-ui_node *ui_label(ui_node *parent, const char *text) {
-  ui_node *node = create_node(parent);
-  node->type = UI_LABEL;
-  node->get_preferred_size = ps_label;
-  node->layout = layout_simple;
-  node->draw = draw_label;
-  memcpy(node->label.text, text, strlen(text));
-  return node;
-}
-ui_node *ui_img(ui_node *parent, bitmap *img) {
-  ui_node *node = create_node(parent);
-  node->type = UI_IMG;
-  node->get_preferred_size = ps_img;
-  node->layout = layout_simple;
-  node->draw = draw_img;
-  node->img.img = img;
-  return node;
 }
 
 static void measure_node(ui_node *node) {
@@ -309,26 +109,102 @@ static ui_node *hit_test(ui_node *node, int mx, int my) {
   return 0;
 }
 
+static void update_node(ui_node *node, ulong time);
+
 void ui_render(ui_size screen_size) {
+  update_node(&g_root, sys_time());
   measure_node(&g_root);
   g_root.layout(&g_root, screen_size, (ui_pos){0, 0});
-  draw_node(&g_root);
+
+  if (s_perf) {
+    s_dirty_count = 0;
+    ulong t0 = rdtsc();
+    draw_node(&g_root, false);
+    ulong cycles = rdtsc() - t0;
+
+    s_frame_count++;
+    ulong now = sys_time();
+    if (now != s_last_sec) {
+      s_fps = s_frame_count;
+      s_frame_count = 0;
+      s_last_sec = now;
+    }
+
+    char buf[64];
+    sprintf(buf, "FPS:%4d  render:%6dK cyc  dirty:%5d", s_fps, cycles / 1000,
+            s_dirty_count);
+    gfx_rect(fb, 0, 0, strlen(buf) * FONT_GLYPH_WIDTH + 8,
+             FONT_GLYPH_HEIGHT + 4, RGB(0, 0, 0));
+    gfx_str(fb, 4, 2, buf, RGB(255, 255, 0));
+  } else {
+    draw_node(&g_root, false);
+  }
 }
 
-static void reset_hover(ui_node *node) {
-  node->hovered = false;
+static void reset_hover(ui_node *node, ui_node *current_hover) {
+  if (node->hovered) {
+    if (node != current_hover) {
+      node->hovered = false;
+      node->dirty = true;
+    }
+  }
   node->pressed = false;
   for (ui_node *child = node->first_child; child; child = child->next_sibling)
-    reset_hover(child);
+    reset_hover(child, current_hover);
 }
 
-void ui_update(window_mouse_event ev) {
-  reset_hover(&g_root);
-  ui_node *node = hit_test(&g_root, ev.x, ev.y);
+void ui_mark_dirty(ui_node *node) { node->dirty = true; }
 
-  if (node) {
-    node->hovered = true;
-    if (ev.buttons)
-      node->pressed = true;
+static void update_node(ui_node *node, ulong time) {
+
+  if (node->update)
+    node->update(node, time);
+
+  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
+    update_node(child, time);
+  }
+}
+
+void ui_update(window_event ev) {
+
+  switch (ev.type) {
+
+  case WET_KEY_DOWN: {
+    if (g_focused && g_focused->_on_key) {
+      KeyEvent ke = {ev.key_event.keycode, ev.key_event.character};
+      g_focused->_on_key(g_focused, ke);
+    }
+    break;
+  }
+  case WET_MOUSE: {
+    static int prev_buttons = 0;
+    int just_pressed = ev.mouse_event.buttons && !prev_buttons;
+    prev_buttons = ev.mouse_event.buttons;
+    ui_node *node = hit_test(&g_root, ev.mouse_event.x, ev.mouse_event.y);
+    reset_hover(&g_root, node);
+
+    if (node) {
+      if (!node->hovered)
+        node->dirty = true;
+      node->hovered = true;
+      node->mouse_x = ev.mouse_event.x - node->calculated_pos.x;
+      node->mouse_y = ev.mouse_event.y - node->calculated_pos.y;
+
+      if (ev.mouse_event.buttons)
+        node->pressed = true;
+      if (just_pressed) {
+        if (g_focused && g_focused != node)
+          g_focused->focused = false;
+        g_focused = node;
+        node->focused = true;
+        if (node->_on_click)
+          node->_on_click(node);
+        if (node->on_click)
+          node->on_click(node);
+      }
+    }
+    break;
+  }
+  default: break;
   }
 }

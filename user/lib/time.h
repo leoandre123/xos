@@ -1,5 +1,8 @@
 #pragma once
+#include "cdefs.h"
 #include "syscall.h"
+
+EXTERN_C_BEGIN
 
 typedef struct {
   uint year;
@@ -53,3 +56,5 @@ static inline datetime time_now(void) {
   ulong ts = sys_time();
   return to_datetime(ts);
 }
+
+EXTERN_C_END

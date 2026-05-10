@@ -25,7 +25,7 @@ def convert(src: Path, dst: Path) -> None:
 def main() -> None:
     args = sys.argv[1:]
     if not args:
-        print(f"usage: {sys.argv[0]} <file.png> [file2.png ...] [-o out.bmp]")
+        print(f"usage: {sys.argv[0]} <file.png> [file2.png ...] [-o out.lbm]")
         sys.exit(1)
 
     # Simple -o flag: only valid when converting a single file
@@ -42,7 +42,7 @@ def main() -> None:
         convert(srcs[0], dst)
     else:
         for src in (Path(a) for a in args):
-            convert(src, src.with_suffix(".bmp"))
+            convert(src, src.with_suffix(".lbm"))
 
 
 if __name__ == "__main__":

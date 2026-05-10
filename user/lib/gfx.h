@@ -87,6 +87,49 @@ static inline void gfx_rect(fb_info *fb, uint x, uint y, uint w, uint h,
   fb_mark_dirty(fb, x, y, w, h);
 }
 
+static inline void gfx_rect_outline(fb_info *fb, uint x, uint y, uint w, uint h,
+                                    uint color) {
+  for (uint dx = 0; dx < w; dx++) {
+    gfx_pixel_blend(fb, x + dx, y, color);
+    gfx_pixel_blend(fb, x + dx, y + h - 1, color);
+  }
+  for (uint dy = 1; dy < h - 1; dy++) {
+    gfx_pixel_blend(fb, x, y + dy, color);
+    gfx_pixel_blend(fb, x + w - 1, y + dy, color);
+  }
+  fb_mark_dirty(fb, x, y, w, h);
+}
+
+static inline void gfx_line(fb_info *fb, int x0, int y0, int x1, int y1,
+                            uint color) {
+  int dx = x1 > x0 ? x1 - x0 : x0 - x1, sx = x0 < x1 ? 1 : -1;
+  int dy = y1 > y0 ? y1 - y0 : y0 - y1, sy = y0 < y1 ? 1 : -1;
+  int err = dx - dy;
+  int ox = x0, oy = y0;
+
+  for (;;) {
+    gfx_pixel(fb, (uint)x0, (uint)y0, color);
+    if (x0 == x1 && y0 == y1)
+      break;
+    int e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x0 += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+
+  int min_x = ox < x1 ? ox : x1, min_y = oy < y1 ? oy : y1;
+  if (min_x < 0)
+    min_x = 0;
+  if (min_y < 0)
+    min_y = 0;
+  fb_mark_dirty(fb, (uint)min_x, (uint)min_y, (uint)(dx + 1), (uint)(dy + 1));
+}
+
 static inline void gfx_putc(fb_info *fb, uint px, uint py, char c, uint fg) {
   int idx = c - FONT_FIRST_CHAR;
   if (idx < 0 || idx >= FONT_GLYPH_COUNT)

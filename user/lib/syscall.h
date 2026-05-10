@@ -1,8 +1,11 @@
 #pragma once
+#include "cdefs.h"
 #include "keyboard.h"
 #include "mouse.h"
 #include "syscalls.h"
 #include "types.h"
+
+EXTERN_C_BEGIN
 
 static inline ulong syscall(ulong num, ulong a1, ulong a2, ulong a3) {
   ulong ret;
@@ -34,7 +37,7 @@ static inline void sys_wait(int pid) { syscall(SYS_WAIT, (ulong)pid, 0, 0); }
 // Returns: high 32 bits = ascii char, low 32 bits = keycode
 static inline KeyEvent sys_read_key(void) {
   ulong r = syscall(SYS_READ_KEY, 0, 0, 0);
-  return (KeyEvent){.character = r >> 32, .code = r & 0xFFFFFFFF};
+  return (KeyEvent){.code = r & 0xFFFFFFFF, .character = r >> 32};
 }
 // static inline char sys_read_char(void) { return (char)(sys_read_key() >> 32);
 // }
@@ -54,10 +57,11 @@ static inline int sys_pipe_avail(int fd) {
 // Non-blocking: returns (char<<32)|keycode, or 0 if no key pending
 static inline KeyEvent sys_read_key_nb(void) {
   ulong r = syscall(SYS_READ_KEY_NB, 0, 0, 0);
-  return (KeyEvent){.character = r >> 32, .code = r & 0xFFFFFFFF};
+  return (KeyEvent){.code = r & 0xFFFFFFFF, .character = r >> 32};
 }
 static inline void sys_yield(void) { syscall(SYS_YIELD, 0, 0, 0); }
 static inline ulong sys_time(void) { return syscall(SYS_TIME, 0, 0, 0); }
+static inline void sys_vblank_wait(void) { syscall(SYS_VBLANK_WAIT, 0, 0, 0); }
 // Allocate size bytes of anonymous memory; returns user virtual address or 0
 static inline void *sys_alloc(ulong size) {
   return (void *)syscall(SYS_ALLOC, size, 0, 0);
@@ -75,3 +79,4 @@ static inline int sys_read_mouse(mouse_event *ev) {
   return 1;
 }
 
+EXTERN_C_END

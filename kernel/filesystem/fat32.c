@@ -301,7 +301,7 @@ int fat32_readdir(const char *path, file_dirent *out, int max) {
           parse_lfn_name(lfn_entry, (out[count_read].name) + ((seq - 1) * 13));
           continue;
         }
-
+        out[count_read].file_size = entries[j].size;
         out[count_read].is_dir = entries[j].attributes & FAT32_ATTR_DIRECTORY;
         if (!has_lfn) {
           char *n = &(out[count_read].name[0]);

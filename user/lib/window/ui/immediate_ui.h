@@ -1,8 +1,11 @@
 #pragma once
+#include "cdefs.h"
 #include "gfx.h"
 #include "image.h"
 #include "rect.h"
 #include "types.h"
+
+EXTERN_C_BEGIN
 
 typedef struct {
   fb_info fb;
@@ -22,3 +25,5 @@ bool ui_button(ui_ctx *ctx, int x, int y, int w, int h, const char *label);
 bool ui_checkbox(ui_ctx *ctx, int x, int y, const char *label, bool *checked);
 
 // void ui_img(ui_ctx *ctx, int x, int y, bitmap *img);
+
+EXTERN_C_END

@@ -1,5 +1,8 @@
 #pragma once
+#include "cdefs.h"
 #include "net_types.h"
+
+EXTERN_C_BEGIN
 
 typedef uint socket;
 typedef uint server_socket;
@@ -20,3 +23,5 @@ int socket_udp_send(socket s, ipv4_addr dst, ushort dst_port, void *buf,
                     int len);
 int socket_udp_recv(socket s, void *buf, int len, ipv4_addr *src,
                     ushort *src_port);
+
+EXTERN_C_END

@@ -31,12 +31,10 @@ done
 # ── Build ─────────────────────────────────────────────────────────────────────
 echo "==== Building kernel ===="
 cd "$KERNEL_DIR"
-make clean
 make
 
 echo "==== Building bootloader ===="
 cd "$BOOTLOADER_DIR"
-make clean
 make
 
 echo "==== Building user apps ===="
@@ -49,7 +47,6 @@ for app_dir in "$USER_DIR/apps"/*/; do
     [ -f "$app_dir/Makefile" ] || continue
     echo "  Building $(basename "$app_dir")..."
     cd "$app_dir"
-    make clean
     make
 done
 

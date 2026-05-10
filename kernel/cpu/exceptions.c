@@ -39,6 +39,34 @@ static const char *g_exception_names[32] = {
     "Reserved"                        // 31
 };
 
+#define KERN_BASE 0xFFFF800000000000UL
+
+static void stack_trace(interrupt_frame *f) {
+  serial_write_line("=== STACK TRACE ===");
+
+  // For a null function pointer call the `call` instruction pushes the return
+  // address before the CPU takes the fault, so the stack slot that would hold
+  // RSP in a privilege-change frame instead holds that return address.
+  if (f->rip == 0) {
+    serial_write("  [call site] ");
+    serial_write_hex(f->rsp);
+    serial_write_char('\n');
+  }
+
+  // Walk the RBP chain.
+  ulong *fp = (ulong *)f->rbp;
+  for (int depth = 0; depth < 24; depth++) {
+    if (!fp || (ulong)fp < KERN_BASE || (ulong)fp & 7)
+      break;
+    serial_write("  [");
+    serial_write_ulong(depth);
+    serial_write("] ");
+    serial_write_hex(fp[1]);  // [rbp+8] = return address
+    serial_write_char('\n');
+    fp = (ulong *)fp[0];      // [rbp+0] = previous rbp
+  }
+}
+
 static void dump_frame(interrupt_frame *f) {
   serial_write_line("=== INTERRUPT FRAME ===");
 
@@ -50,8 +78,6 @@ static void dump_frame(interrupt_frame *f) {
   serial_write_hex(f->error_code);
   serial_write("\n");
 
-  // CPU-pushed iretq frame sits just after our saved registers
-  ulong *cpu_frame = (ulong *)((ulong)f + sizeof(interrupt_frame));
   serial_write("rip:    ");
   serial_write_hex(f->rip);
   serial_write("\n");
@@ -119,6 +145,8 @@ static void dump_frame(interrupt_frame *f) {
   serial_write("r15: ");
   serial_write_hex(f->r15);
   serial_write("\n");
+
+  stack_trace(f);
 }
 
 void default_handler(interrupt_frame *frame) {

@@ -13,7 +13,6 @@
 #include "io/ata.h"
 #include "io/e1000.h"
 #include "io/keyboard.h"
-#include "io/keys.h"
 #include "io/logging.h"
 #include "io/mouse.h"
 #include "io/pci.h"
@@ -24,6 +23,7 @@
 #include "io/timer.h"
 #include "io/usb/usb.h"
 #include "io/xhci.h"
+#include "keys.h"
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
@@ -41,6 +41,7 @@ uint g_fb_height;
 uint g_fb_pitch;
 ulong g_fb_phys;
 BootDevice g_boot_device;
+bool g_fast_boot;
 
 extern void enter_kernel_main(ulong stack_addr);
 
@@ -57,6 +58,7 @@ void kernel_pre_main(BootInfo *boot_info) {
   g_fb_pitch = boot_info->framebuffer_pitch;
   g_fb_phys = boot_info->framebuffer_base;
   g_boot_device = boot_info->boot_device;
+  g_fast_boot = boot_info->fast_boot;
 
   uint *fb_phys = (uint *)(ulong)boot_info->framebuffer_base;
   uint pitch_px = boot_info->framebuffer_pitch / 4;
@@ -144,10 +146,11 @@ void kernel_main() {
 
   klogf(LOG_INFO, "NETWORK LOGGING ENABLED");
 
-  klogf(LOG_INFO, "Initializing USB...");
-  usb_init();
-
-  xhci_init();
+  if (!g_fast_boot) {
+    klogf(LOG_INFO, "Initializing USB...");
+    usb_init();
+    xhci_init();
+  }
 
   if (fs_init(&g_boot_device)) {
     klogf(LOG_CRITICAL, "Failed to install file system!");
@@ -193,32 +196,28 @@ void kernel_main() {
   serial_printf("%04u-%02u-%02u %02u:%02u:%02u\n",
                 t.year, t.month, t.day, t.hour, t.minute, t.second);
 
-  dhcp_send_discovery();
-
-  klogf(LOG_DEBUG, "Sleep...");
   timer_init(47);
-
-  ksleep_ms(4000);
-  klogf(LOG_DEBUG, "Done!");
-
-  dns_resolve("www.google.com");
-
-  icmp_send_ping(IP(10, 0, 2, 2));
-  icmp_send_ping(IP(8, 8, 8, 8));
-
+  if (!g_fast_boot) {
+    dhcp_send_discovery();
+    klogf(LOG_DEBUG, "Sleep...");
+    ksleep_ms(4000);
+    klogf(LOG_DEBUG, "Done!");
+    dns_resolve("www.google.com");
+    icmp_send_ping(IP(10, 0, 2, 2));
+    icmp_send_ping(IP(8, 8, 8, 8));
+  }
   // http_test();
 
   time_init();
 
   logging_set_screen_logging(false);
-
-  gfx_clear(RGB(82, 50, 49));
-  bitmap *logo = img_load("/logo.lbm");
-  gfx_img(100, 100, logo);
-  kfree(logo);
-
-  ksleep_ms(4000);
-
+  if (!g_fast_boot) {
+    gfx_clear(RGB(82, 50, 49));
+    bitmap *logo = img_load("/logo.lbm");
+    gfx_img(100, 100, logo);
+    kfree(logo);
+    ksleep_ms(4000);
+  }
   klogf(LOG_INFO, "Starting scheduler...");
   scheduler_run();
 

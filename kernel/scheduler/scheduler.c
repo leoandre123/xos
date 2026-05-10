@@ -127,6 +127,8 @@ void schedule() {
   g_current = next;
   g_current->state = TASK_RUNNING;
 
+  __asm__ volatile("cli");
+
   if (next->address_space) {
     vmm_switch_address_space(next->address_space);
     ulong kstack_top = (ulong)next->stack_base + next->stack_size;
@@ -143,6 +145,8 @@ void schedule() {
     serial_write_line("First context_switch");
     context_switch(&dummy, (ulong)next->rsp);
   }
+
+  __asm__ volatile("sti");
 }
 task *scheduler_find(int pid) {
   if (!g_task_list)

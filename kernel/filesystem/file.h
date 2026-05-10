@@ -16,8 +16,9 @@ typedef struct {
 typedef file *file_handle;
 
 typedef struct {
-  char name[255];
+  char name[247];
   bool is_dir;
+  ulong file_size;
 } file_dirent;
 
 typedef struct {

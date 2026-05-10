@@ -67,12 +67,10 @@ def find_ovmf():
 def build():
     section("Build")
 
-    run("make", "clean", cwd=KERNEL,     label="kernel clean")
-    run("make",          cwd=KERNEL,     label="kernel build")
+    run("make", cwd=KERNEL,     label="kernel build")
     ok("Kernel")
 
-    run("make", "clean", cwd=BOOTLOADER, label="bootloader clean")
-    run("make",          cwd=BOOTLOADER, label="bootloader build")
+    run("make", cwd=BOOTLOADER, label="bootloader build")
     ok("Bootloader")
 
     if not shutil.which("mcopy"):
@@ -91,8 +89,7 @@ def build():
         for app_dir in app_dirs:
             name = os.path.basename(os.path.dirname(app_dir))
             progress.update(task, description=f"[cyan]Building [bold]{name}[/bold]")
-            run("make", "clean", cwd=app_dir, quiet=True)
-            run("make",          cwd=app_dir, quiet=True)
+            run("make", cwd=app_dir, quiet=True)
             progress.advance(task)
 
     ok(f"{len(app_dirs)} user app(s)")
@@ -231,16 +228,49 @@ def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug):
     subprocess.run(cmd, check=True)
 
 
+def clean():
+    section("Clean")
+    targets = [
+        (os.path.join(KERNEL,     "build"), "Kernel build"),
+        (os.path.join(BOOTLOADER, "build"), "Bootloader build"),
+        (BUILD,                             "Top-level build"),
+        (os.path.join(ROOT,       "disk.bin"), "disk.bin"),
+    ]
+    app_dirs = sorted(
+        d for d in glob.glob(os.path.join(USER, "apps", "*", ""))
+        if os.path.isfile(os.path.join(d, "Makefile"))
+    )
+    for app_dir in app_dirs:
+        name = os.path.basename(os.path.dirname(app_dir))
+        targets.append((os.path.join(app_dir, "build"), f"{name} build"))
+
+    for path, label in targets:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+            ok(f"Removed  {os.path.relpath(path, ROOT)}")
+        elif os.path.isfile(path):
+            os.remove(path)
+            ok(f"Removed  {os.path.relpath(path, ROOT)}")
+        else:
+            console.print(f"  [dim]–  {label} already clean[/dim]")
+
+
 def main():
     parser = argparse.ArgumentParser(description="XOS build & run")
+    parser.add_argument("--clean",        action="store_true", help="Remove all build artifacts and exit")
     parser.add_argument("--desktop",     dest="init_mode",  action="store_const", const="dafne")
     parser.add_argument("--terminal",    dest="init_mode",  action="store_const", const="terminal")
     parser.add_argument("--usb",         dest="drive_mode", action="store_const", const="usb")
     parser.add_argument("--ata",         dest="drive_mode", action="store_const", const="ata")
     parser.add_argument("--debug", "-d", action="store_true")
     parser.add_argument("--pxe",         action="store_true")
+    parser.add_argument("--fast-boot",   action="store_true")
     parser.set_defaults(init_mode="terminal", drive_mode="ata")
     args = parser.parse_args()
+
+    if args.clean:
+        clean()
+        return
 
     tftp_root = os.environ.get("PXE_ROOT", "/mnt/c/tftpboot")
     os.makedirs(BUILD, exist_ok=True)

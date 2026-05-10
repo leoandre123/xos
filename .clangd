@@ -24,3 +24,15 @@ CompileFlags:
     - -ffreestanding
     - -nostdinc
     - -m64
+
+---
+If:
+  PathMatch: user/.*\.cpp
+CompileFlags:
+  Remove:
+    - -xc
+  Add:
+    - -xc++
+    - -std=gnu++20
+    - -fno-exceptions
+    - -fno-rtti

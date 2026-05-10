@@ -1,0 +1,57 @@
+
+#include "gfx.h"
+#include "keyboard.h"
+#include "keys.h"
+#include "types.h"
+#include "window/ui/retained_ui.h"
+#include "window/ui/retained_ui_internal.h"
+#include <string.h>
+
+static ui_size ps_text_field(ui_node *node) {
+  ushort w = strlen(node->label.text) * FONT_GLYPH_WIDTH;
+  ushort h = FONT_GLYPH_HEIGHT;
+  return WITH_PADDING(w, h, node->padding);
+}
+
+static void draw_text_field(ui_node *node) {
+  if (node->focused)
+    gfx_rect_outline(fb, node->calculated_pos.x, node->calculated_pos.y,
+                     node->calculated_size.w, node->calculated_size.h,
+                     RGB(0, 0, 0));
+  gfx_str(fb, node->calculated_pos.x + node->padding,
+          node->calculated_pos.y + node->padding, node->label.text,
+          node->label.color);
+}
+
+static void text_field_on_key(ui_node *node, KeyEvent ev) {
+  int len = strlen(node->text_field.text) + 1;
+
+  if (ev.code == KEY_BACKSPACE) {
+    if (len > 1)
+      node->text_field.text[len - 2] = '\0';
+    return;
+  }
+
+  if (len >= TEXT_FIELD_MAX_LENGTH) {
+    return;
+  }
+  node->text_field.text[len - 1] = ev.character;
+  node->text_field.text[len] = '\0';
+}
+
+static void text_field_update(ui_node *node, ulong time) {
+  static ulong last_time = 0;
+  if (time != last_time) {
+    node->dirty = true;
+  }
+}
+
+ui_node *ui_text_field(ui_node *parent) {
+  ui_node *node = MAKE_NODE(parent, UI_LABEL, ps_text_field, layout_simple,
+                            draw_text_field);
+  node->update = text_field_update;
+  node->_on_key = text_field_on_key;
+  node->interactive = true;
+  node->text_field.text[0] = '\0';
+  return node;
+}

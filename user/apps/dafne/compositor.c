@@ -2,6 +2,7 @@
 #include "compositor_event.h"
 #include "gfx.h"
 #include "rect.h"
+#include "syscall.h"
 #include "window.h"
 
 fb_info g_backbuffer;
@@ -94,6 +95,7 @@ static void full_composite() {
     gfx_blit(&g_backbuffer, w->x, w->y + WINDOW_TITLE_BAR_HEIGHT, &w->surface);
   }
 
+  sys_vblank_wait();
   draw_cursor(&g_backbuffer, g_cursor_x, g_cursor_y);
   gfx_blit(&g_screen, 0, 0, &g_backbuffer);
 }
@@ -181,6 +183,7 @@ void compositor_run() {
   draw_cursor(&g_backbuffer, g_cursor_x, g_cursor_y);
 
   // --- 5. Blit dirty region to screen ---
+  sys_vblank_wait();
   gfx_blit_region(&g_screen, dirty_region.x, dirty_region.y, &g_backbuffer,
                   dirty_region.x, dirty_region.y, dirty_region.w,
                   dirty_region.h);

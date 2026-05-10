@@ -932,6 +932,9 @@ static void process_report(int sid) {
     case 0x52:
       ev.code = KEY_UP;
       break;
+    case 0x2A:
+      ev.code = KEY_BACKSPACE;
+      break;
     case 0x2B:
       ev.code = KEY_TAB;
       ev.character = '\t';

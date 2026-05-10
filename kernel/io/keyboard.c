@@ -238,6 +238,9 @@ void on_key_event(void) {
     if (sc == 0x1C) {
       ev.code = KEY_RETURN;
       ev.character = '\n';
+    } else if (sc == 0x0E) {
+      ev.code = KEY_BACKSPACE;
+      ev.character = 0x08;
     } else {
       char c = scancode_set1_to_ascii(sc);
       if (c) {

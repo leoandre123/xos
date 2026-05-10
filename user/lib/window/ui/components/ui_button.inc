@@ -1,4 +1,5 @@
-#include "memory.h"
+#include "string.h"
+#include "window/ui/retained_ui.h"
 #include "window/ui/retained_ui_internal.h"
 
 static ui_size ps_button(ui_node *node) {
@@ -17,16 +18,14 @@ static void draw_button(ui_node *node) {
 }
 
 ui_node *rui_button(ui_node *parent, const char *title) {
-  ui_node *node = create_node(parent);
-  node->type = UI_BUTTON;
-  node->get_preferred_size = ps_button;
-  node->layout = layout_simple;
-  node->draw = draw_button;
+  ui_node *node =
+      MAKE_NODE(parent, UI_BUTTON, ps_button, layout_simple, draw_button);
+
   node->padding = 5;
   node->interactive = true;
   node->bg_color = 0xff505080;
   node->bg_hover = 0xff303050;
   node->button.color = 0x00ffffff;
-  memcpy(node->button.text, title, strlen(title));
+  strcpy(node->button.text, title);
   return node;
 }

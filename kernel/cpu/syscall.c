@@ -5,12 +5,13 @@
 #include "filesystem/file.h"
 #include "gdt.h"
 #include "graphics/console.h"
+#include "io/io.h"
 #include "io/keyboard.h"
-#include "io/keys.h"
 #include "io/mouse.h"
 #include "io/serial.h"
 #include "io/time.h"
 #include "ipc/pipe.h"
+#include "keys.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
 #include "net/socket.h"
@@ -122,16 +123,8 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
 
   case SYS_READ_KEY: {
     KeyEvent ev;
-    // serial_write_line("SYS_READ_KEY: enabling interrupts and halting");
-    __asm__ volatile("sti");
-    while ((ev = keyboard_last()).code == KEY_NONE) {
-      // serial_write_line("SYS_READ_KEY: halting...");
-      schedule();
-      //__asm__ volatile("hlt");
-      // serial_write_line("SYS_READ_KEY: woke from hlt");
-    }
-    // serial_write_line("SYS_READ_KEY: got key!");
-    __asm__ volatile("cli");
+    while ((ev = keyboard_last()).code == KEY_NONE)
+      __asm__ volatile("sti; hlt; cli");
     return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
   }
 
@@ -177,7 +170,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     if (!t)
       return (ulong)-1;
     while (t->state != TASK_DEAD)
-      schedule();
+      __asm__ volatile("sti; hlt; cli");
     return 0;
   }
 
@@ -200,10 +193,8 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     if (!h || h->type != HANDLE_PIPE_READ)
       return (ulong)-1;
     pipe *p = (pipe *)h->ptr;
-    __asm__ volatile("sti");
     while (pipe_available(p) == 0)
-      schedule();
-    __asm__ volatile("cli");
+      __asm__ volatile("sti; hlt; cli");
     return (ulong)pipe_read(p, (ubyte *)arg2, (uint)arg3);
   }
 
@@ -275,6 +266,14 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
 
   case SYS_TIME:
     return time_now();
+
+  case SYS_VBLANK_WAIT: {
+    __asm__ volatile("sti");
+    while (!(inb(0x3DA) & 0x08))
+      schedule();
+    __asm__ volatile("cli");
+    return 0;
+  }
 
   case SYS_FILE_OPEN:
     return (ulong)file_open((const char *)arg1);
