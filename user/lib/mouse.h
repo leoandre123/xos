@@ -8,7 +8,7 @@ EXTERN_C_BEGIN
 #define MOUSE_BTN_MIDDLE 4
 
 typedef struct {
-  int x, y, buttons;
+  int x, y, buttons, scroll;
 } mouse_event;
 
 EXTERN_C_END

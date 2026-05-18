@@ -1,6 +1,8 @@
 #pragma once
 #include "cdefs.h"
+#include "cpu_info.h"
 #include "keyboard.h"
+#include "mem_info.h"
 #include "mouse.h"
 #include "syscalls.h"
 #include "types.h"
@@ -33,6 +35,7 @@ static inline int sys_exec_fds(const char *path, int stdin_fd, int stdout_fd) {
   return (int)syscall(SYS_EXEC, (ulong)path, (ulong)stdin_fd, (ulong)stdout_fd);
 }
 static inline void sys_wait(int pid) { syscall(SYS_WAIT, (ulong)pid, 0, 0); }
+static inline uint sys_wait_any() { syscall(SYS_WAIT, 0, 0, 0); }
 
 // Returns: high 32 bits = ascii char, low 32 bits = keycode
 static inline KeyEvent sys_read_key(void) {
@@ -60,11 +63,33 @@ static inline KeyEvent sys_read_key_nb(void) {
   return (KeyEvent){.code = r & 0xFFFFFFFF, .character = r >> 32};
 }
 static inline void sys_yield(void) { syscall(SYS_YIELD, 0, 0, 0); }
-static inline ulong sys_time(void) { return syscall(SYS_TIME, 0, 0, 0); }
+
+[[deprecated("Replaced by sys_unix_time")]]
+static inline ulong sys_time(void) {
+  return syscall(SYS_UNIX_TIME, 0, 0, 0);
+}
+
+static inline ulong sys_unix_time(void) {
+  return syscall(SYS_UNIX_TIME, 0, 0, 0);
+}
+static inline ulong sys_unix_time_millis(void) {
+  return syscall(SYS_UNIX_TIME_MILLIS, 0, 0, 0);
+}
+
 static inline void sys_vblank_wait(void) { syscall(SYS_VBLANK_WAIT, 0, 0, 0); }
+
+static inline void sys_mem_info(mem_info *info) {
+  syscall(SYS_STATS_MEMORY, (ulong)info, 0, 0);
+}
+static inline void sys_cpu_info(cpu_info *info) {
+  syscall(SYS_STATS_CPU, (ulong)info, 0, 0);
+}
 // Allocate size bytes of anonymous memory; returns user virtual address or 0
 static inline void *sys_alloc(ulong size) {
   return (void *)syscall(SYS_ALLOC, size, 0, 0);
+}
+static inline void sys_free(void *ptr, ulong size) {
+  syscall(SYS_FREE, (ulong)ptr, size, 0);
 }
 
 // Non-blocking. Returns 1 and fills *ev if a new mouse event is available, 0
@@ -76,6 +101,7 @@ static inline int sys_read_mouse(mouse_event *ev) {
   ev->x = (int)(unsigned short)(r & 0xFFFF);
   ev->y = (int)(unsigned short)((r >> 16) & 0xFFFF);
   ev->buttons = (int)((r >> 32) & 0xFF);
+  ev->scroll = (int)(signed char)((r >> 49) & 0xFF);
   return 1;
 }
 

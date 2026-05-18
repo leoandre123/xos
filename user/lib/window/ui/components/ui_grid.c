@@ -113,8 +113,8 @@ static void draw_grid(ui_node *node) {
     else if (row % 2 == 0 && node->grid.row_alt_color)
       color = node->grid.row_alt_color;
     if (color)
-      gfx_rect(fb, node->calculated_pos.x, y, node->calculated_size.w,
-               row_height, color);
+      gfx_rect(&g_ui_current_fb, node->calculated_pos.x, y,
+               node->calculated_size.w, row_height, color);
     y += row_height + gap;
   }
 }
@@ -134,7 +134,7 @@ static void on_click_grid(ui_node *node) {
   }
 }
 
-static void grid_update(ui_node *node, ulong time) {
+static void grid_update(ui_node *node) {
   int child_count = get_child_count(node);
   int row_count = child_count == 0 ? 0 : (child_count / node->grid.cols) + 1;
   int gap = node->grid.gap;
@@ -145,7 +145,7 @@ static void grid_update(ui_node *node, ulong time) {
       int rh = node->grid.row_heights[row];
       if (node->mouse_y >= y && node->mouse_y < y + rh) {
         if (node->grid.hovered_row != row) {
-          node->dirty = true;
+          ui_mark_dirty(node);
           node->grid.hovered_row = row;
         }
         break;
@@ -154,7 +154,7 @@ static void grid_update(ui_node *node, ulong time) {
     }
   } else if (node->grid.hovered_row != -1) {
     node->grid.hovered_row = -1;
-    node->dirty = true;
+    ui_mark_dirty(node);
   }
 }
 

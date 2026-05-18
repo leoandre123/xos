@@ -9,12 +9,13 @@ static ui_size ps_img(ui_node *node) {
 }
 static void draw_img(ui_node *node) {
   if (node->img.img)
-    gfx_img(fb, node->calculated_pos.x, node->calculated_pos.y, node->img.img);
+    gfx_img(&g_ui_current_fb, node->calculated_pos.x, node->calculated_pos.y,
+            node->img.img);
 }
 
 void ui_img_set_img(ui_node *node, bitmap *img) {
   node->img.img = img;
-  node->dirty = true;
+  ui_mark_dirty(node);
 }
 
 ui_node *ui_img(ui_node *parent, bitmap *img) {

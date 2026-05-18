@@ -2,6 +2,7 @@
 #include "io/e1000.h"
 #include "io/serial.h"
 #include "net/net.h"
+#include "net_types.h"
 #include "udp.h"
 
 ipv4_addr g_ip = {.value = 0};
@@ -13,7 +14,7 @@ void dhcp_send_discovery() {
   packet.htype = 1;
   packet.hlen = 6;
   packet.xid = htonl(0x1337);
-  e1000_get_mac(packet.client_hw_addr);
+  e1000_get_mac((mac_addr *)&packet.client_hw_addr);
   packet.magic_cookie = htonl(0x63825363);
   packet.flags = htons(0x8000); // broadcast flag
 
@@ -42,7 +43,7 @@ static void dhcp_send_request(ipv4_addr offered_ip, ipv4_addr server_ip) {
   packet.htype = 1;
   packet.hlen = 6;
   packet.xid = htonl(0x1337);
-  e1000_get_mac(packet.client_hw_addr);
+  e1000_get_mac((mac_addr *)&packet.client_hw_addr);
   packet.magic_cookie = htonl(0x63825363);
   packet.flags = htons(0x8000);
 

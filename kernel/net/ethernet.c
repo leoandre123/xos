@@ -1,6 +1,5 @@
 #include "ethernet.h"
 #include "io/logging.h"
-#include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
 #include "net/ip.h"

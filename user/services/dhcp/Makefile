@@ -1,2 +1,2 @@
-APP_NAME = test_app2
+APP_NAME = dhcp
 include ../../app.mk

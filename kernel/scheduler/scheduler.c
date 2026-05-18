@@ -7,6 +7,7 @@
 #include "memory/pmm.h"
 #include "memory/vmm.h"
 #include "panic.h"
+#include "scheduler/process.h"
 #include "task.h"
 #include "types.h"
 
@@ -17,7 +18,7 @@ int g_scheduler_running = 0;
 static task *g_current = 0;
 static task *g_task_list = 0;
 static task *g_idle = 0;
-static int g_next_pid = 1;
+static uint s_next_id = 1;
 
 task *scheduler_current(void) { return g_current; }
 
@@ -40,7 +41,7 @@ __attribute__((noreturn)) void task_bootstrap() {
 }
 
 __attribute__((noreturn)) static void user_task_bootstrap() {
-  serial_printf("user_task_bootstrap: task='%s' entry=%x\n", g_current->name, (ulong)g_current->entry);
+  serial_printf("user_task_bootstrap: task='%s' entry=%x\n", g_current->owner->name, (ulong)g_current->entry);
   gdt_set_kernel_stack((ulong)g_current->stack_base + g_current->stack_size);
   jump_to_userspace((ulong)g_current->entry, (ulong)g_current->user_rsp);
 }
@@ -69,11 +70,11 @@ static void idle() {
   for (;;)
     asm volatile("hlt");
 }
-static inline task *task_create(void (*entry)(void *), void *args, const char *name, address_space *space) {
+static inline task *task_create(void (*entry)(void *), void *args) {
   task *t = kmalloc(sizeof(task));
   if (!t)
     return 0;
-  memset8(t, 0, sizeof(task));
+  memset8((ubyte *)t, 0, sizeof(task));
 
   void *stack = kmalloc(4096);
   if (!stack) {
@@ -82,20 +83,13 @@ static inline task *task_create(void (*entry)(void *), void *args, const char *n
   }
   memset8(stack, 0, 4096);
 
-  t->pid = g_next_pid++;
+  t->id = s_next_id++;
   t->stack_base = stack;
   t->stack_size = 4096;
   t->next = 0;
   t->state = TASK_READY;
   t->entry = entry;
   t->args = args;
-  t->address_space = space;
-
-  int i = 0;
-  while (name[i] != '\0') {
-    t->name[i] = name[i];
-    i++;
-  }
 
   ulong *sp = stack + 4096;
   sp = (void *)((ulong)sp & ~0xFULL);
@@ -108,7 +102,7 @@ static inline task *task_create(void (*entry)(void *), void *args, const char *n
   *--sp = 0; // r14
   *--sp = 0; // r15
 
-  t->rsp = sp;
+  t->kernel_rsp = sp;
 
   return t;
 }
@@ -129,8 +123,8 @@ void schedule() {
 
   __asm__ volatile("cli");
 
-  if (next->address_space) {
-    vmm_switch_address_space(next->address_space);
+  if (next->owner && next->owner->address_space) {
+    vmm_switch_address_space(next->owner->address_space);
     ulong kstack_top = (ulong)next->stack_base + next->stack_size;
     gdt_set_kernel_stack(kstack_top);
     g_syscall_kernel_rsp = kstack_top;
@@ -139,21 +133,21 @@ void schedule() {
   }
 
   if (prev) {
-    context_switch((ulong *)&prev->rsp, (ulong)next->rsp);
+    context_switch((ulong *)&prev->kernel_rsp, (ulong)next->kernel_rsp);
   } else {
     ulong dummy = 0;
     serial_write_line("First context_switch");
-    context_switch(&dummy, (ulong)next->rsp);
+    context_switch(&dummy, (ulong)next->kernel_rsp);
   }
 
   __asm__ volatile("sti");
 }
-task *scheduler_find(int pid) {
+task *scheduler_find(uint id) {
   if (!g_task_list)
     return 0;
   task *t = g_task_list;
   do {
-    if (t->pid == pid)
+    if (t->id == id)
       return t;
     t = t->next;
   } while (t != g_task_list);
@@ -161,7 +155,7 @@ task *scheduler_find(int pid) {
 }
 
 void scheduler_init() {
-  g_idle = task_create_kernel(idle, 0, "idle");
+  g_idle = task_create_kernel(idle, 0);
 }
 void scheduler_add(task *task) {
   if (!g_task_list) {
@@ -179,47 +173,23 @@ __attribute__((noreturn)) void scheduler_run() {
   panic("schedule_run has returned");
 }
 
-task *task_create_kernel(void (*entry)(void *), void *args, const char *name) {
-  return task_create(entry, args, name, 0);
+task *task_create_kernel(void (*entry)(void *), void *args) {
+  return task_create(entry, args);
 }
 
-task *task_create_user(void (*entry)(void *), void *args, const char *name) {
-  address_space *space = vmm_create_address_space();
-  task *t = task_create(entry, args, name, space);
+task *task_create_user_from_space(address_space *space, void *entry, uint task_index) {
+  task *t = task_create(entry, 0);
 
   // allocate and map user stack
   ulong phys_stack = pmm_alloc_pages(USER_STACK_PAGES);
-  ulong user_stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
+  ulong user_stack_top = USER_STACK_TOP - (USER_STACK_PAGES * PAGE_SIZE * task_index);
+  ulong user_stack_base = user_stack_top - (USER_STACK_PAGES * PAGE_SIZE);
   vmm_map_pages(space, user_stack_base, phys_stack, USER_STACK_PAGES,
                 PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
 
-  t->user_rsp = (void *)USER_STACK_TOP - 8; // where rsp points when entering ring 3
-  ulong *sp = t->rsp;
+  t->user_rsp = (void *)user_stack_top - 8; // where rsp points when entering ring 3
+  ulong *sp = t->kernel_rsp;
   sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
 
-  t->heap_next = USER_HEAP_BASE;
-
-  return t;
-}
-task *task_create_user_from_space(address_space *space, void *entry, const char *name, const char *wd) {
-  task *t = task_create(entry, 0, name, space);
-
-  // allocate and map user stack
-  ulong phys_stack = pmm_alloc_pages(USER_STACK_PAGES);
-  ulong user_stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;
-  vmm_map_pages(space, user_stack_base, phys_stack, USER_STACK_PAGES,
-                PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
-
-  t->user_rsp = (void *)USER_STACK_TOP - 8; // where rsp points when entering ring 3
-  ulong *sp = t->rsp;
-  sp[6] = (ulong)user_task_bootstrap; // overwrite the return address
-
-  t->heap_next = USER_HEAP_BASE;
-
-  int i = 0;
-  while (wd[i] != '\0') {
-    t->working_directory[i] = wd[i];
-    i++;
-  }
   return t;
 }

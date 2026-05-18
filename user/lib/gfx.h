@@ -2,13 +2,34 @@
 #include "fb_info.h"
 #include "font.h"
 #include "image.h"
+#include "math.h"
+#include "memory.h"
 #include "rect.h"
 #include "syscall.h"
+#include "types.h"
 #include <stdarg.h>
 #include <stdio.h>
 
-#define RGB(r, g, b) ((0xff << 24u) | (r << 16u) | (g << 8u) | (b))
+#define RGB(r, g, b) ((0xffu << 24u) | (r << 16u) | (g << 8u) | (b))
 #define ARGB(a, r, g, b) ((a << 24u) | (r << 16u) | (g << 8u) | (b))
+
+extern rect g_clip_rect;
+
+static inline void gfx_set_clip(fb_info *fb, rect rc) {
+  g_clip_rect.x = CLAMP(rc.x, 0, fb->width);
+  g_clip_rect.y = CLAMP(rc.y, 0, fb->height);
+  g_clip_rect.w = CLAMP(rc.w, 0, fb->width - rc.x);
+  g_clip_rect.h = CLAMP(rc.h, 0, fb->height - rc.y);
+}
+
+static inline rect gfx_get_clip() { return g_clip_rect; }
+
+static inline void gfx_clear_clip(fb_info *fb) {
+  g_clip_rect.x = 0;
+  g_clip_rect.y = 0;
+  g_clip_rect.w = fb->width;
+  g_clip_rect.h = fb->height;
+}
 
 // Expand the dirty rect to include (x, y, w, h).
 static inline void fb_mark_dirty(fb_info *fb, uint x, uint y, uint w, uint h) {
@@ -39,16 +60,19 @@ static inline int fb_is_dirty(fb_info *fb) { return fb->dirty_region.w > 0; }
 static inline void gfx_map(fb_info *fb) {
   syscall(SYS_MAP_FB, (ulong)fb, 0, 0);
   fb->dirty_region.w = 0; // start clean
+  gfx_clear_clip(fb);
 }
 
 static inline void gfx_pixel(fb_info *fb, uint x, uint y, uint color) {
-  if (x >= fb->width || y >= fb->height)
+  if (x < g_clip_rect.x || x >= g_clip_rect.x + g_clip_rect.w ||
+      y < g_clip_rect.y || y >= g_clip_rect.y + g_clip_rect.h)
     return;
   fb->ptr[y * (fb->pitch / 4) + x] = color;
 }
 
 static inline void gfx_pixel_blend(fb_info *fb, uint x, uint y, uint color) {
-  if (x >= fb->width || y >= fb->height)
+  if (x < g_clip_rect.x || x >= g_clip_rect.x + g_clip_rect.w ||
+      y < g_clip_rect.y || y >= g_clip_rect.y + g_clip_rect.h)
     return;
   uint src_a = (color >> 24) & 0xFF;
   if (src_a == 0)
@@ -73,18 +97,47 @@ static inline void gfx_pixel_blend(fb_info *fb, uint x, uint y, uint color) {
 
 static inline void gfx_fill(fb_info *fb, uint color) {
   uint pitch_px = fb->pitch / 4;
-  for (uint y = 0; y < fb->height; y++)
-    for (uint x = 0; x < fb->width; x++)
-      fb->ptr[y * pitch_px + x] = color;
-  fb_mark_dirty(fb, 0, 0, fb->width, fb->height);
+  int x1 = g_clip_rect.x, y1 = g_clip_rect.y;
+  int x2 = x1 + g_clip_rect.w, y2 = y1 + g_clip_rect.h;
+  for (int y = y1; y < y2; y++)
+    for (int x = x1; x < x2; x++)
+      fb->ptr[(uint)y * pitch_px + (uint)x] = color;
+  fb_mark_dirty(fb, (uint)x1, (uint)y1, g_clip_rect.w, g_clip_rect.h);
 }
 
-static inline void gfx_rect(fb_info *fb, uint x, uint y, uint w, uint h,
-                            uint color) {
-  for (uint dy = 0; dy < h; dy++)
-    for (uint dx = 0; dx < w; dx++)
-      gfx_pixel_blend(fb, x + dx, y + dy, color);
-  fb_mark_dirty(fb, x, y, w, h);
+__attribute__((noinline, optimize("O2"))) static void
+gfx_rect(fb_info *fb, int x, int y, uint w, uint h, uint color) {
+  int x1 = x > g_clip_rect.x ? x : g_clip_rect.x;
+  int y1 = y > g_clip_rect.y ? y : g_clip_rect.y;
+  int x2 = x + (int)w < g_clip_rect.x + g_clip_rect.w
+               ? x + (int)w
+               : g_clip_rect.x + g_clip_rect.w;
+  int y2 = y + (int)h < g_clip_rect.y + g_clip_rect.h
+               ? y + (int)h
+               : g_clip_rect.y + g_clip_rect.h;
+  if (x1 >= x2 || y1 >= y2)
+    return;
+  uint pitch_px = fb->pitch / 4;
+  uint src_a = (color >> 24) & 0xFF;
+  if (src_a == 255) {
+    for (int dy = y1; dy < y2; dy++)
+      for (int dx = x1; dx < x2; dx++)
+        fb->ptr[(uint)dy * pitch_px + (uint)dx] = color;
+  } else if (src_a > 0) {
+    uint src_r = (color >> 16) & 0xFF;
+    uint src_g = (color >> 8) & 0xFF;
+    uint src_b = color & 0xFF;
+    uint inv_a = 255 - src_a;
+    for (int dy = y1; dy < y2; dy++)
+      for (int dx = x1; dx < x2; dx++) {
+        uint dst = fb->ptr[(uint)dy * pitch_px + (uint)dx];
+        fb->ptr[(uint)dy * pitch_px + (uint)dx] =
+            ((src_r * src_a + ((dst >> 16) & 0xFF) * inv_a) / 255) << 16 |
+            ((src_g * src_a + ((dst >> 8) & 0xFF) * inv_a) / 255) << 8 |
+            ((src_b * src_a + (dst & 0xFF) * inv_a) / 255);
+      }
+  }
+  fb_mark_dirty(fb, (uint)x1, (uint)y1, (uint)(x2 - x1), (uint)(y2 - y1));
 }
 
 static inline void gfx_rect_outline(fb_info *fb, uint x, uint y, uint w, uint h,
@@ -130,28 +183,29 @@ static inline void gfx_line(fb_info *fb, int x0, int y0, int x1, int y1,
   fb_mark_dirty(fb, (uint)min_x, (uint)min_y, (uint)(dx + 1), (uint)(dy + 1));
 }
 
-static inline void gfx_putc(fb_info *fb, uint px, uint py, char c, uint fg) {
+static inline void gfx_putc(fb_info *fb, int px, int py, char c, uint fg) {
   int idx = c - FONT_FIRST_CHAR;
   if (idx < 0 || idx >= FONT_GLYPH_COUNT)
     idx = 0;
   const ubyte *glyph = g_font[idx];
-  for (uint row = 0; row < FONT_GLYPH_HEIGHT; row++) {
-    for (uint col = 0; col < FONT_GLYPH_WIDTH; col++) {
+  for (int row = 0; row < FONT_GLYPH_HEIGHT; row++) {
+    for (int col = 0; col < FONT_GLYPH_WIDTH; col++) {
       if ((glyph[row] & (1 << (7 - col)))) {
-        gfx_pixel(fb, px + col, py + row, fg);
+        gfx_pixel(fb, (uint)(px + col), (uint)(py + row), fg);
       }
     }
   }
-  fb_mark_dirty(fb, px, py, FONT_GLYPH_WIDTH, FONT_GLYPH_HEIGHT);
+  if (px >= 0 && py >= 0)
+    fb_mark_dirty(fb, (uint)px, (uint)py, FONT_GLYPH_WIDTH, FONT_GLYPH_HEIGHT);
 }
 
-static inline void gfx_str(fb_info *fb, uint x, uint y, const char *s,
-                           uint fg) {
-  uint start_x = x;
+static inline void gfx_str(fb_info *fb, int x, int y, const char *s, uint fg) {
+  int start_x = x;
   for (; *s; s++, x += FONT_GLYPH_WIDTH)
     gfx_putc(fb, x, y, *s, fg);
-  if (x > start_x)
-    fb_mark_dirty(fb, start_x, y, x - start_x, FONT_GLYPH_HEIGHT);
+  if (x > start_x && start_x >= 0 && y >= 0)
+    fb_mark_dirty(fb, (uint)start_x, (uint)y, (uint)(x - start_x),
+                  FONT_GLYPH_HEIGHT);
 }
 
 static inline void gfx_strf(fb_info *fb, uint x, uint y, uint fg,
@@ -169,15 +223,26 @@ static inline void gfx_strf(fb_info *fb, uint x, uint y, uint fg,
 // Allocate an off-screen pixel buffer. Draw into it with any gfx_* function,
 // then flush it to the real framebuffer with gfx_flush.
 static inline fb_info gfx_create_surface(uint w, uint h) {
+  sys_write("1\n");
   fb_info fb;
   fb.ptr = (uint *)sys_alloc((ulong)w * h * 4);
+
+  if (!fb.ptr) {
+    sys_write("ERROR: fb ptr is null");
+    for (;;)
+      __asm__("hlt");
+  }
+  sys_write("2\n");
   fb.width = w;
   fb.height = h;
   fb.pitch = w * 4;
   fb.dirty_region.w = 0;
+  sys_write("3\n");
+  sys_write_hex((ulong)fb.ptr);
   uint total = w * h;
   for (uint i = 0; i < total; i++)
     fb.ptr[i] = 0;
+  sys_write("4\n");
   return fb;
 }
 
@@ -194,32 +259,56 @@ static inline void gfx_flush(fb_info *dst, int dx, int dy, fb_info *src) {
     int d_row = dy + (int)(sy + row);
     if (d_row < 0 || (uint)d_row >= dst->height)
       continue;
-    for (uint col = 0; col < sw; col++) {
-      int d_col = dx + (int)(sx + col);
-      if (d_col < 0 || (uint)d_col >= dst->width)
-        continue;
-      dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
-          src->ptr[(sy + row) * src_pitch_px + sx + col];
-    }
+    int d_col = dx + (int)sx;
+    if (d_col < 0 || (uint)d_col + sw > dst->width)
+      continue;
+    memcpy(&dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col],
+           &src->ptr[(sy + row) * src_pitch_px + sx], sw * 4);
   }
   fb_clear_dirty(src);
 }
 
-// Copy src surface onto dst at pixel offset (dx, dy), clipping to dst bounds.
+// Copy src surface onto dst at pixel offset (dx, dy), clipping to dst bounds
+// and clip rect.
 static inline void gfx_blit(fb_info *dst, int dx, int dy, fb_info *src) {
+  int src_x0 = 0, src_y0 = 0;
+  int dst_x0 = dx, dst_y0 = dy;
+  int dst_x1 = dx + (int)src->width, dst_y1 = dy + (int)src->height;
+  int cr_x1 = g_clip_rect.x + g_clip_rect.w,
+      cr_y1 = g_clip_rect.y + g_clip_rect.h;
+  if (dst_x0 < g_clip_rect.x) {
+    src_x0 += g_clip_rect.x - dst_x0;
+    dst_x0 = g_clip_rect.x;
+  }
+  if (dst_y0 < g_clip_rect.y) {
+    src_y0 += g_clip_rect.y - dst_y0;
+    dst_y0 = g_clip_rect.y;
+  }
+  if (dst_x1 > cr_x1)
+    dst_x1 = cr_x1;
+  if (dst_y1 > cr_y1)
+    dst_y1 = cr_y1;
+  if (dst_x0 < 0) {
+    src_x0 -= dst_x0;
+    dst_x0 = 0;
+  }
+  if (dst_y0 < 0) {
+    src_y0 -= dst_y0;
+    dst_y0 = 0;
+  }
+  if (dst_x1 > (int)dst->width)
+    dst_x1 = (int)dst->width;
+  if (dst_y1 > (int)dst->height)
+    dst_y1 = (int)dst->height;
+  if (dst_x0 >= dst_x1 || dst_y0 >= dst_y1)
+    return;
   uint dst_pitch_px = dst->pitch / 4;
   uint src_pitch_px = src->pitch / 4;
-  for (uint row = 0; row < src->height; row++) {
-    int d_row = dy + (int)row;
-    if (d_row < 0 || (uint)d_row >= dst->height)
-      continue;
-    for (uint col = 0; col < src->width; col++) {
-      int d_col = dx + (int)col;
-      if (d_col < 0 || (uint)d_col >= dst->width)
-        continue;
-      dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
-          src->ptr[row * src_pitch_px + col];
-    }
+  uint w = (uint)(dst_x1 - dst_x0), h = (uint)(dst_y1 - dst_y0);
+  for (uint row = 0; row < h; row++) {
+    uint d_row = (uint)dst_y0 + row, s_row = (uint)src_y0 + row;
+    memcpy(&dst->ptr[d_row * dst_pitch_px + (uint)dst_x0],
+           &src->ptr[s_row * src_pitch_px + (uint)src_x0], w * 4);
   }
 }
 
@@ -256,17 +345,23 @@ static inline void gfx_blit_region(fb_info *dst, int dx, int dy, fb_info *src,
 
   uint dst_pitch_px = dst->pitch / 4;
   uint src_pitch_px = src->pitch / 4;
+  // clamp column range to clip rect and dst bounds once, outside the row loop
+  int col0 = dx < g_clip_rect.x ? g_clip_rect.x - dx : 0;
+  int col1 = (int)sw;
+  if (dx + col1 > g_clip_rect.x + g_clip_rect.w)
+    col1 = g_clip_rect.x + g_clip_rect.w - dx;
+  if (dx + col1 > (int)dst->width)
+    col1 = (int)dst->width - dx;
+  if (col0 >= col1)
+    return;
   for (uint row = 0; row < sh; row++) {
     int d_row = dy + (int)row;
-    if (d_row < 0 || (uint)d_row >= dst->height)
+    if (d_row < 0 || (uint)d_row >= dst->height || d_row < g_clip_rect.y ||
+        d_row >= g_clip_rect.y + g_clip_rect.h)
       continue;
-    for (uint col = 0; col < sw; col++) {
-      int d_col = dx + (int)col;
-      if (d_col < 0 || (uint)d_col >= dst->width)
-        continue;
-      dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
-          src->ptr[((uint)sy + row) * src_pitch_px + (uint)sx + col];
-    }
+    memcpy(&dst->ptr[(uint)d_row * dst_pitch_px + (uint)(dx + col0)],
+           &src->ptr[((uint)sy + row) * src_pitch_px + (uint)sx + (uint)col0],
+           (uint)(col1 - col0) * 4);
   }
 }
 
@@ -325,12 +420,14 @@ static inline void gfx_blit_region_rounded(fb_info *dst, int dx, int dy,
     uint col0 = (uint)icol0, col1 = (uint)icol1;
 
     int d_row = dy + (int)row;
-    if (d_row < 0 || (uint)d_row >= dst->height)
+    if (d_row < 0 || (uint)d_row >= dst->height || d_row < g_clip_rect.y ||
+        d_row >= g_clip_rect.y + g_clip_rect.h)
       continue;
 
     for (uint col = col0; col < col1; col++) {
       int d_col = dx + (int)col;
-      if (d_col < 0 || (uint)d_col >= dst->width)
+      if (d_col < 0 || (uint)d_col >= dst->width || d_col < g_clip_rect.x ||
+          d_col >= g_clip_rect.x + g_clip_rect.w)
         continue;
       dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
           src->ptr[fy * src_pitch_px + (uint)sx + col];

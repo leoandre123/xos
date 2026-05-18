@@ -24,13 +24,18 @@ static void layout_vstack(ui_node *node, ui_size size, ui_pos pos) {
   // compute space left for expand children
   int fixed_h = 0, expand_count = 0;
   for (ui_node *c = node->first_child; c; c = c->next_sibling) {
-    if (c->expand) expand_count++;
-    else fixed_h += c->preferred_size.h + gap;
+    if (c->expand)
+      expand_count++;
+    else
+      fixed_h += c->preferred_size.h + gap;
   }
-  if (fixed_h > 0) fixed_h -= gap;
-  ushort expand_h = expand_count > 0
-    ? (ushort)((size.h - fixed_h - gap * (expand_count - 1)) / expand_count)
-    : 0;
+  if (fixed_h > 0)
+    fixed_h -= gap;
+  ushort expand_h =
+      expand_count > 0
+          ? (ushort)((size.h - fixed_h - gap * (expand_count - 1)) /
+                     expand_count)
+          : 0;
 
   ui_pos child_pos = pos;
   for (ui_node *child = node->first_child; child; child = child->next_sibling) {

@@ -14,9 +14,11 @@ uint g_timer_frequency = 0;
 
 void timer_handler() {
   g_timer_ticks++;
-  e1000_poll();
-  xhci_poll();
-  if (g_scheduler_running)
+  if (g_timer_ticks % 50 == 0)
+    e1000_poll();
+  if (g_timer_ticks % 8 == 0)
+    xhci_poll();
+  if (g_timer_ticks % 10 == 0 && g_scheduler_running)
     schedule();
 }
 

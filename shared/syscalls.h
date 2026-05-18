@@ -14,12 +14,21 @@
 #define SYS_PIPE_AVAIL    10 // arg1=fd; returns bytes available without blocking
 #define SYS_READ_KEY_NB   11 // non-blocking; returns (char<<32)|code or 0 if no key
 #define SYS_YIELD         12 // yield CPU to scheduler
-#define SYS_ALLOC         13 // arg1=size in bytes; maps anon pages, returns user vaddr or 0
 #define SYS_READ_MOUSE    14 // non-blocking; returns (1<<48)|(buttons<<32)|(y<<16)|x or 0
 #define SYS_WRITE_HEX     20
-#define SYS_TIME          40
-#define SYS_VBLANK_WAIT   41 // blocking wating for vsync, no args
+
+/* MEMORY 30-40*/
+#define SYS_ALLOC 30 // arg1=size in bytes; maps anon pages, returns user vaddr or 0
+#define SYS_FREE  31
+
+/* TIME 40- */
+#define SYS_UNIX_TIME        40
+#define SYS_UNIX_TIME_MILLIS 41
+#define SYS_VBLANK_WAIT      42 // blocking wating for vsync, no args
+
 /* PROCESSES 60-79 */
+#define SYS_PROCESS_EXEC 60
+#define SYS_PROCESS_LIST 61 // arg1=buf, arg2=max_count
 
 /* FILES 80-99*/
 #define SYS_FILE_OPEN    80 // arg1=path, arg2=option returns handle
@@ -35,14 +44,21 @@
 #define SYS_SOCKET_SEND    103
 #define SYS_SOCKET_RECEIVE 104
 #define SYS_SOCKET_CLOSE   105
+#define SYS_SOCKET_UDP     106 // arg1=remote_addr, arg2=remote_port, arg3=local_port; returns socket handle
+#define SYS_NET_GET_MAC    110 // arg1=ubyte[6] buf; fills MAC address
+#define SYS_NET_SET_IP     111 // arg1=ipv4_addr.value; sets kernel IP after DHCP
 
-/* COMPOSITOR 120-129 */
-#define SYS_COMPOSITOR_REGISTER 120
-#define SYS_COMPOSITOR_POLL     121
+/* WINDOW MANAGER 120-129 */
+#define SYS_WM_REGISTER 120
+#define SYS_WM_POLL     121
 
-/* WINDOW 130- */
+/* WINDOW 130-139*/
 #define SYS_WINDOW_CREATE      130
 #define SYS_WINDOW_POLL        131
 #define SYS_WINDOW_PRESENT     132
 #define SYS_WINDOW_POST_EVENT  133
 #define SYS_WINDOW_FRAMEBUFFER 134
+
+/* STATS 140-149 */
+#define SYS_STATS_MEMORY 140 // arg1=&mem_info
+#define SYS_STATS_CPU    141 // arg1=&cpu_info

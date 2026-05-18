@@ -5,12 +5,10 @@
 #include "memory/memutils.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
-#include "scheduler/scheduler.h"
-#include "scheduler/task.h"
 
-task *elf_load(file_handle file_handle, const char *name, const char *wd) {
+void *elf_load(file_handle file_handle, address_space *space) {
   if (file_handle->size < sizeof(elf_header)) {
-    serial_printf("File to small for an ELF: %s\n", name);
+    serial_printf("File to small for an ELF:\n");
     return 0;
   }
 
@@ -30,7 +28,7 @@ task *elf_load(file_handle file_handle, const char *name, const char *wd) {
   if (hdr->magic[0] != 0x7F || hdr->magic[1] != 'E')
     return 0;
 
-  address_space *space = vmm_create_address_space();
+  // address_space *space = vmm_create_address_space();
 
   for (int i = 0; i < hdr->program_entry_count; i++) {
     elf_program_header *prg_hdr = (elf_program_header *)(data + hdr->program_offset + i * hdr->program_entry_size);
@@ -55,5 +53,5 @@ task *elf_load(file_handle file_handle, const char *name, const char *wd) {
   ulong entry = hdr->program_entry;
   kfree(data);
 
-  return task_create_user_from_space(space, (void *)entry, name, wd);
+  return (void *)entry;
 }

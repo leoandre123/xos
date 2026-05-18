@@ -159,7 +159,7 @@ int main(void) {
   int shell_in_w = (int)(p2 >> 32);
 
   // Spawn shell with its stdin=shell_in_r, stdout=shell_out_w
-  sys_exec_fds("/shell.elf", shell_in_r, shell_out_w);
+  sys_exec_fds("/sys/programs/shell.elf", shell_in_r, shell_out_w);
 
   // Main loop: render shell output, forward keyboard input
 

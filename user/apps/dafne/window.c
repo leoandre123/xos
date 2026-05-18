@@ -65,3 +65,21 @@ void window_show(window *w, bool show) {
     w->title_dirty = true;
   }
 }
+
+void window_post_event(window *w, window_event *event) {
+  for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
+    if (&g_windows[i] == w) {
+      syscall(SYS_WINDOW_POST_EVENT, i, (ulong)event, 0);
+    }
+  }
+}
+
+void window_swap_buffers(window *w) {
+  void *tmp = w->front_buf.ptr;
+  w->front_buf.ptr = w->back_buf.ptr;
+  w->back_buf.ptr = tmp;
+
+  tmp = w->usr_front_buf;
+  w->usr_front_buf = w->usr_back_buf;
+  w->usr_back_buf = tmp;
+}

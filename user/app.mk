@@ -7,10 +7,15 @@
 #   APP_NAME = my_app
 #   include ../../app.mk
 
-CC      = gcc
+CC      = gcc-14
 CXX     = g++
 LD      = ld
 AS      = nasm
+OBJCOPY = objcopy
+
+# App directory: where the including Makefile lives
+APP_DIR    := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
+ICON_FILE  := $(wildcard $(APP_DIR)icon.lbm)
 
 GCC_BUILTIN_INCLUDES := $(shell $(CC) -print-file-name=include)
 
@@ -57,6 +62,9 @@ all: $(ELF)
 $(ELF): $(CRT0) $(OBJS)
 	@mkdir -p $(BUILD)
 	$(LD) $(LDFLAGS) $(CRT0) $(OBJS) -o $(ELF)
+ifneq ($(ICON_FILE),)
+	$(OBJCOPY) --add-section .icon=$(ICON_FILE) --set-section-flags .icon=noload,readonly $(ELF)
+endif
 
 $(CRT0): $(USER_ROOT)/lib/crt0.c
 	@mkdir -p $(BUILD)

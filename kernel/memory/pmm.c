@@ -145,6 +145,7 @@ void pmm_init(BootInfo *boot_info) {
         ulong addr = (desc->PhysicalStart) + i * 4096ULL;
         pmm_unreserve_page(addr);
         g_pmm.max_address = addr;
+        g_pmm.total_memory += 4096ULL;
       }
     }
     cur += boot_info->memory_map_desc_size;
@@ -256,4 +257,10 @@ void pmm_free_pages(ulong addr, uint count) {
 
 ulong pmm_get_max_address() {
   return g_pmm.max_address;
+}
+
+void pmm_get_stats(mem_info *info) {
+  info->total = g_pmm.page_count * 4096ULL;
+  info->used  = g_pmm.used_memory;
+  info->free  = info->total - info->used;
 }

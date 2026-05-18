@@ -31,5 +31,12 @@ static rect rect_intersect(rect a, rect b) {
   int y2 = a.y + (int)a.h < b.y + (int)b.h ? a.y + (int)a.h : b.y + (int)b.h;
   if (x2 <= x1 || y2 <= y1)
     return (rect){0};
-  return (rect){x1, y1, (uint)(x2 - x1), (uint)(y2 - y1)};
+  return (rect){(short)x1, (short)y1, (ushort)(x2 - x1), (ushort)(y2 - y1)};
+}
+
+static inline bool rect_equals(rect a, rect b) {
+  return a.x == b.x &&
+         a.y == b.y &&
+         a.w == b.w &&
+         a.h == b.h;
 }

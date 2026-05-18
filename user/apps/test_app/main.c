@@ -42,7 +42,7 @@ int main(void) {
     ui_rect(&ctx, ctx.ui_rect, 0x00102040);
     if (ui_button(&ctx, 50, 50, 100, 25, "BUTTON")) {
       x++;
-      sys_exec("/terminal_2.elf");
+      sys_exec("/sys/programs/terminal_2.elf");
     }
 
     rect rc = {

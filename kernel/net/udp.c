@@ -2,7 +2,6 @@
 #include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
-#include "net/dhcp.h"
 #include "net/ip.h"
 #include "net/net.h"
 #include "net/socket.h"
@@ -18,7 +17,6 @@ typedef struct {
 static udp_socket g_sockets[UDP_MAX_SOCKETS];
 static const ushort reserved_ports[] = {
     UDP_PORT_DNS,
-    UDP_PORT_DHCP_CLIENT,
     0,
 };
 
@@ -132,14 +130,10 @@ void udp_on_data(void *data, ushort data_len) {
 
   serial_printf("UDP: received packet with length %1d bytes to port %1d\n", data_len, dst_port);
 
-  if (dst_port == UDP_PORT_DHCP_CLIENT) {
-    dhcp_receive(payload, payload_len);
-  } else {
-    for (int i = 0; i < UDP_MAX_SOCKETS; i++) {
-      if (g_sockets[i].id && g_sockets[i].local_port == dst_port) {
-        socket_queue_write(&g_sockets[i].packets, payload, payload_len);
-        break;
-      }
+  for (int i = 0; i < UDP_MAX_SOCKETS; i++) {
+    if (g_sockets[i].id && g_sockets[i].local_port == dst_port) {
+      socket_queue_write(&g_sockets[i].packets, payload, payload_len);
+      break;
     }
   }
 }

@@ -30,15 +30,29 @@ static void inline memcpy8(ubyte *dst, ubyte *src, ulong count) {
   }
 }
 static void inline memcpy(void *dst, const void *src, ulong count) {
-  for (ulong i = 0; i < count; i++) {
-    ((ubyte *)dst)[i] = ((ubyte *)src)[i];
-  }
+  ulong n = count / 4;
+  __asm__ volatile("rep movsd" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
+  // handle remaining bytes (count not a multiple of 4)
+  ulong rem = count % 4;
+  ubyte *d = (ubyte *)dst, *s = (ubyte *)src;
+  for (ulong i = 0; i < rem; i++)
+    d[i] = s[i];
 }
 
-static void *malloc(ulong size) { return sys_alloc(size); }
+typedef struct {
+  ulong size;
+} malloc_hdr;
+
+static void *malloc(ulong size) {
+  ulong total = size + sizeof(malloc_hdr);
+  malloc_hdr *hdr = (malloc_hdr *)sys_alloc(total);
+  hdr->size = total;
+  return ((void *)hdr) + sizeof(malloc_hdr);
+}
 
 static void free(void *ptr) {
-  // TODO: implement
+  malloc_hdr *hdr = (malloc_hdr *)(ptr - sizeof(malloc_hdr));
+  sys_free(hdr, hdr->size);
 }
 
 EXTERN_C_END

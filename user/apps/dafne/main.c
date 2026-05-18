@@ -1,5 +1,4 @@
 #include "compositor.h"
-#include "compositor_event.h"
 #include "font.h"
 #include "gfx.h"
 #include "keyboard.h"
@@ -10,7 +9,7 @@
 #include "time.h"
 #include "window.h"
 #include "window_event.h"
-#include <stdio.h>
+#include "wm_event.h"
 
 #define MAX_ANSI_ARGUMENTS 16
 
@@ -27,15 +26,17 @@ static mouse_event g_mouse;
 
 static ulong g_time;
 
-static int sys_window_post_event(window_handle handle, window_event *ev) {
-  return (int)syscall(SYS_WINDOW_POST_EVENT, handle, (ulong)ev, 0);
-}
-
 static window_handle focused_handle(void) {
   for (int i = 0; i < WINDOW_MAX_COUNT; i++)
     if (g_windows[i].exists && g_windows[i].focused)
       return (window_handle)i;
   return (window_handle)-1;
+}
+static window *focused_window(void) {
+  for (int i = 0; i < WINDOW_MAX_COUNT; i++)
+    if (g_windows[i].exists && g_windows[i].focused)
+      return &g_windows[i];
+  return 0;
 }
 
 static window_handle get_window_at_pos(int x, int y) {
@@ -43,27 +44,27 @@ static window_handle get_window_at_pos(int x, int y) {
     if (!g_windows[i].exists || g_windows[i].hidden)
       continue;
     if (x >= g_windows[i].x &&
-        x < g_windows[i].x + (int)g_windows[i].surface.width &&
+        x < g_windows[i].x + (int)g_windows[i].front_buf.width &&
         y >= g_windows[i].y &&
         y < g_windows[i].y + WINDOW_TITLE_BAR_HEIGHT +
-                (int)g_windows[i].surface.height)
+                (int)g_windows[i].front_buf.height)
       return (window_handle)i;
   }
   return (window_handle)-1;
 }
 
 static bool hit_minimize(window *w, int x, int y) {
-  int bx = w->x + (int)w->surface.width - 50;
+  int bx = w->x + (int)w->front_buf.width - 50;
   return x >= bx && x < bx + 21 && y >= w->y + 2 && y < w->y + 23;
 }
 
 static bool hit_close(window *w, int x, int y) {
-  int bx = w->x + (int)w->surface.width - 25;
+  int bx = w->x + (int)w->front_buf.width - 25;
   return x >= bx && x < bx + 21 && y >= w->y + 2 && y < w->y + 23;
 }
 
 static bool hit_title_bar(window *w, int x, int y) {
-  return x >= w->x && x < w->x + (int)w->surface.width && y >= w->y &&
+  return x >= w->x && x < w->x + (int)w->front_buf.width && y >= w->y &&
          y < w->y + WINDOW_TITLE_BAR_HEIGHT;
 }
 
@@ -145,20 +146,21 @@ static void handle_input() {
         wev.mouse_event.x = ev.x - w->x;
         wev.mouse_event.y = ev.y - w->y - WINDOW_TITLE_BAR_HEIGHT;
         wev.mouse_event.buttons = ev.buttons;
-        sys_window_post_event(wh, &wev);
+        wev.mouse_event.scroll = ev.scroll;
+        window_post_event(w, &wev);
       }
     }
   }
 
   // Forward input to focused client window
-  window_handle fh = focused_handle();
-  if (fh != (window_handle)-1) {
+  window *w = focused_window();
+  if (w) {
     KeyEvent key = sys_read_key_nb();
     if (key.character || key.code) {
       window_event wev = {.type = WET_KEY_DOWN};
       wev.key_event.keycode = key.code;
       wev.key_event.character = key.character;
-      sys_window_post_event(fh, &wev);
+      window_post_event(w, &wev);
     }
     if (key.character == '0') {
       window_focus_next();
@@ -166,30 +168,50 @@ static void handle_input() {
   }
 }
 
+static void send_paint_events() {
+
+  for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
+    window *w = &g_windows[i];
+    if (!w->exists || !w->presented)
+      continue;
+    w->presented = false;
+    window_event ev = {.type = WET_PAINT};
+    ev.paint_event.paint_handle = w->usr_back_buf;
+    window_post_event(w, &ev);
+  }
+}
+
 int main(void) {
   sys_write("Hello from DAFNE (Desktop And File Navigation Environment)!\n");
 
+  sys_write("Mapping fb: ");
   gfx_map(&g_screen);
+
+  char buf[50];
+  sprintf(buf, "%x\n", &g_screen);
+  sys_write(buf);
+  sys_write("creating surface\n");
   g_desktop = gfx_create_surface(g_screen.width, g_screen.height);
+
+  sys_write("inniting compositor\n");
   compositor_init();
 
   gfx_fill(&g_desktop, BG);
   gfx_rect(&g_desktop, 0, g_desktop.height - 50, g_desktop.width, 50, TB);
   memset8((ubyte *)&g_windows, 0, sizeof(g_windows));
 
-  sys_exec("/test_app.elf");
-  sys_exec("/terminal_2.elf");
-  sys_exec("/files.elf");
-  sys_exec("/navigator.elf");
+  sys_write("running navigator\n");
+  sys_exec("/sys/programs/navigator.elf");
+  sys_exec("/sys/programs/performance_monitor.elf");
   sys_read_mouse(&g_mouse);
+
+  sys_write("running loop");
   while (1) {
-
     update_desktop();
-
     compositor_handle_events();
     handle_input();
     compositor_run();
-
+    send_paint_events();
     sys_yield();
   }
 }

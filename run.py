@@ -78,7 +78,8 @@ def build():
         sys.exit(1)
 
     app_dirs = sorted(
-        d for d in glob.glob(os.path.join(USER, "apps", "*", ""))
+        d for pattern in ("apps", "services")
+        for d in glob.glob(os.path.join(USER, pattern, "*", ""))
         if os.path.isfile(os.path.join(d, "Makefile"))
     )
 
@@ -92,7 +93,7 @@ def build():
             run("make", cwd=app_dir, quiet=True)
             progress.advance(task)
 
-    ok(f"{len(app_dirs)} user app(s)")
+    ok(f"{len(app_dirs)} user app(s) + service(s)")
 
 
 def prepare_esp():
@@ -160,7 +161,10 @@ def populate_data(image, init_mode):
     run("mformat", "-i", f"{image}@@{DATA_BYTE}", "-F", "-v", "XOS", "::",
         label="Formatting data partition")
 
-    elfs   = sorted(glob.glob(os.path.join(USER, "apps", "*", "build", "*.elf")))
+    elfs   = sorted(
+        e for pattern in ("apps", "services")
+        for e in glob.glob(os.path.join(USER, pattern, "*", "build", "*.elf"))
+    )
     assets = sorted(glob.glob(os.path.join(ROOT, "rootfs", "*")))
     total  = len(elfs) + 1 + len(assets)
 
@@ -169,23 +173,27 @@ def populate_data(image, init_mode):
                   console=console) as progress:
         task = progress.add_task("Data partition", total=total)
 
-        for elf in elfs:
-            name = os.path.basename(elf)
-            progress.update(task, description=f"[cyan]Copying [bold]{name}[/bold]")
-            subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", elf, f"::/{name}"],
-                           capture_output=True, check=True)
-            progress.advance(task)
-
-        progress.update(task, description="[cyan]Writing [bold]init[/bold]")
-        subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", "-", "::init"],
-                       input=init_mode.encode(), capture_output=True, check=True)
-        progress.advance(task)
-
         for entry in assets:
             name = os.path.basename(entry)
             progress.update(task, description=f"[cyan]Copying [bold]{name}[/bold]")
             flags = ["-s"] if os.path.isdir(entry) else []
             subprocess.run(["mcopy", *flags, "-i", f"{image}@@{DATA_BYTE}", entry, f"::{name}"],
+                           capture_output=True, check=True)
+            progress.advance(task)
+
+        progress.update(task, description="[cyan]Writing [bold]init[/bold]")
+        subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", "-", "::boot/init"],
+                       input=init_mode.encode(), capture_output=True, check=True)
+        progress.advance(task)
+
+        subprocess.run(["mmd", "-i", f"{image}@@{DATA_BYTE}", "-D", "s", "::/sys"],
+                       capture_output=True)
+        subprocess.run(["mmd", "-i", f"{image}@@{DATA_BYTE}", "-D", "s", "::/sys/programs"],
+                       capture_output=True)
+        for elf in elfs:
+            name = os.path.basename(elf)
+            progress.update(task, description=f"[cyan]Copying [bold]{name}[/bold]")
+            subprocess.run(["mcopy", "-i", f"{image}@@{DATA_BYTE}", elf, f"::/sys/programs/{name}"],
                            capture_output=True, check=True)
             progress.advance(task)
 
@@ -217,7 +225,7 @@ def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug):
     console.print(Panel(info, title="[bold green]Launching QEMU[/bold green]", border_style="green"))
     console.print()
 
-    cmd = ["qemu-system-x86_64", "-m", "256M", *drives,
+    cmd = ["qemu-system-x86_64", "-m", "256M", "-cpu", "max", "-smp", "4", *drives,
            "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
            "-device", "qemu-xhci,id=xhci", *usb_devs,
            "-object", "filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap",
@@ -237,7 +245,8 @@ def clean():
         (os.path.join(ROOT,       "disk.bin"), "disk.bin"),
     ]
     app_dirs = sorted(
-        d for d in glob.glob(os.path.join(USER, "apps", "*", ""))
+        d for pattern in ("apps", "services")
+        for d in glob.glob(os.path.join(USER, pattern, "*", ""))
         if os.path.isfile(os.path.join(d, "Makefile"))
     )
     for app_dir in app_dirs:

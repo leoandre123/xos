@@ -125,12 +125,14 @@ mcopy -i "$IMAGE"@@"$EFI_BYTE" "$KERNEL_DIR/build/kernel.bin" ::kernel.bin
 
 # Format and populate data partition
 mformat -i "$IMAGE"@@"$DATA_BYTE" -F -v "XOS" ::
-echo "==== Copying user apps ===="
-for elf in "$USER_DIR/apps"/*/build/*.elf; do
+echo "==== Copying programs ===="
+mmd -i "$IMAGE"@@"$DATA_BYTE" -D s ::/sys
+mmd -i "$IMAGE"@@"$DATA_BYTE" -D s ::/sys/programs
+for elf in "$USER_DIR/apps"/*/build/*.elf "$USER_DIR/services"/*/build/*.elf; do
     [ -f "$elf" ] || continue
     elf_name="$(basename "$elf")"
     echo "  Copying $elf_name..."
-    mcopy -i "$IMAGE"@@"$DATA_BYTE" "$elf" "::/$elf_name"
+    mcopy -i "$IMAGE"@@"$DATA_BYTE" "$elf" "::/sys/programs/$elf_name"
 done
 echo -n "$INIT_MODE" | mcopy -i "$IMAGE"@@"$DATA_BYTE" - "::init"
 echo "==== Copying rootfs ===="
@@ -159,6 +161,7 @@ fi
 
 qemu-system-x86_64 \
     -m 256M \
+    -cpu max -smp 4 \
     "${QEMU_DRIVES[@]}" \
     -netdev user,id=net0 \
     -device e1000,netdev=net0 \

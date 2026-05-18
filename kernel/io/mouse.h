@@ -4,6 +4,7 @@
 typedef struct {
   int x, y;
   int buttons; // bit0=left, bit1=right, bit2=middle
+  int scroll;  // signed scroll delta from wheel
   int pending;
 } mouse_state;
 

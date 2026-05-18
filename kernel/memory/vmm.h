@@ -61,4 +61,5 @@ void vmm_map_pages(address_space *space, ulong virtual_addr,
                    ulong phys_addr, ulong page_count, ulong flags);
 void vmm_map_bytes(address_space *space, ulong virtual_addr,
                    ulong phys_addr, ulong size, ulong flags);
+void vmm_unmap_and_free_pages(address_space *space, ulong virtual_addr, ulong page_count);
 ulong vmm_virt_to_phys(address_space *space, ulong virt);

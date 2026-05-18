@@ -1,4 +1,4 @@
-CC = gcc
+CC = gcc-14
 LD = ld
 AS = nasm
 OBJCOPY = objcopy

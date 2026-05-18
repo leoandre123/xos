@@ -3,6 +3,8 @@
 #include "idt.h"
 #include "io/serial.h"
 #include "panic.h"
+#include "scheduler/process.h"
+#include "scheduler/scheduler.h"
 
 static const char *g_exception_names[32] = {
     "Divide Error",                   // 0
@@ -61,9 +63,9 @@ static void stack_trace(interrupt_frame *f) {
     serial_write("  [");
     serial_write_ulong(depth);
     serial_write("] ");
-    serial_write_hex(fp[1]);  // [rbp+8] = return address
+    serial_write_hex(fp[1]); // [rbp+8] = return address
     serial_write_char('\n');
-    fp = (ulong *)fp[0];      // [rbp+0] = previous rbp
+    fp = (ulong *)fp[0]; // [rbp+0] = previous rbp
   }
 }
 
@@ -209,6 +211,12 @@ void pagefault_handler2(interrupt_frame *frame) {
   console_writef("RBX: %x\n", frame->rbx);
   console_writef("RCX: %x\n", frame->rcx);
   console_writef("RDX: %x\n", frame->rdx);
+
+  task *curr = scheduler_current();
+
+  if (curr) {
+    console_writef(curr->owner->name);
+  }
 
   dump_frame(frame);
 

@@ -1,6 +1,7 @@
 #include "mouse.h"
 #include "cpu/idt.h"
 #include "io.h"
+#include "io/serial.h"
 #include "pic.h"
 #include "types.h"
 
@@ -9,8 +10,9 @@ extern uint g_fb_width;
 extern uint g_fb_height;
 
 static volatile mouse_state g_mouse = {0};
-static ubyte g_packet[3];
-static int   g_packet_idx = 0;
+static bool g_intellimouse = false;
+static ubyte g_packet[4];
+static int g_packet_idx = 0;
 
 // --------------------------------------------------------------------------
 // 8042 PS/2 controller helpers
@@ -18,12 +20,14 @@ static int   g_packet_idx = 0;
 
 static void ps2_wait_write(void) {
   int t = 100000;
-  while (t-- && (inb(0x64) & 0x02)); // wait for input buffer empty
+  while (t-- && (inb(0x64) & 0x02))
+    ; // wait for input buffer empty
 }
 
 static void ps2_wait_read(void) {
   int t = 100000;
-  while (t-- && !(inb(0x64) & 0x01)); // wait for output buffer full
+  while (t-- && !(inb(0x64) & 0x01))
+    ; // wait for output buffer full
 }
 
 static void mouse_cmd(ubyte cmd) {
@@ -55,7 +59,8 @@ static void on_mouse_irq(interrupt_frame *frame) {
 
   g_packet[g_packet_idx++] = data;
 
-  if (g_packet_idx == 3) {
+  int packet_size = g_intellimouse ? 4 : 3;
+  if (g_packet_idx == packet_size) {
     g_packet_idx = 0;
 
     ubyte flags = g_packet[0];
@@ -75,14 +80,26 @@ static void on_mouse_irq(interrupt_frame *frame) {
     int ny = g_mouse.y + dy;
 
     // clamp to framebuffer bounds
-    if (nx < 0) nx = 0;
-    if (ny < 0) ny = 0;
-    if ((uint)nx >= g_fb_width)  nx = (int)g_fb_width  - 1;
-    if ((uint)ny >= g_fb_height) ny = (int)g_fb_height - 1;
+    if (nx < 0)
+      nx = 0;
+    if (ny < 0)
+      ny = 0;
+    if ((uint)nx >= g_fb_width)
+      nx = (int)g_fb_width - 1;
+    if ((uint)ny >= g_fb_height)
+      ny = (int)g_fb_height - 1;
 
-    g_mouse.x       = nx;
-    g_mouse.y       = ny;
+    g_mouse.x = nx;
+    g_mouse.y = ny;
     g_mouse.buttons = flags & 0x07;
+
+    if (g_intellimouse) {
+      int dz = g_packet[3] & 0x0F;
+      if (dz & 0x08)
+        dz -= 16; // sign-extend 4-bit value
+      g_mouse.scroll += dz;
+    }
+
     g_mouse.pending = 1;
   }
 
@@ -111,8 +128,8 @@ void mouse_init(void) {
   outb(0x64, 0x20);
   ps2_wait_read();
   ubyte cfg = inb(0x60);
-  cfg |=  0x01; // keep keyboard IRQ1 enabled
-  cfg |=  0x02; // enable mouse IRQ12
+  cfg |= 0x01;  // keep keyboard IRQ1 enabled
+  cfg |= 0x02;  // enable mouse IRQ12
   cfg &= ~0x10; // keep keyboard clock enabled
   cfg &= ~0x20; // enable mouse clock
   ps2_wait_write();
@@ -120,12 +137,35 @@ void mouse_init(void) {
   ps2_wait_write();
   outb(0x60, cfg);
 
-  // Set defaults, then enable data reporting
-  mouse_cmd(0xF6); mouse_ack();
-  mouse_cmd(0xF4); mouse_ack();
+  // Set defaults
+  mouse_cmd(0xF6);
+  mouse_ack();
+
+  // IntelliMouse detection: magic sample-rate sequence 200→100→80, then read ID
+  mouse_cmd(0xF3);
+  mouse_ack();
+  mouse_cmd(200);
+  mouse_ack();
+  mouse_cmd(0xF3);
+  mouse_ack();
+  mouse_cmd(100);
+  mouse_ack();
+  mouse_cmd(0xF3);
+  mouse_ack();
+  mouse_cmd(80);
+  mouse_ack();
+  mouse_cmd(0xF2);
+  mouse_ack();            // request device ID (ACK)
+  ubyte id = mouse_ack(); // actual ID: 0x03 = IntelliMouse
+  g_intellimouse = (id == 0x03);
+  serial_printf("mouse: device id=0x%02x intellimouse=%d\n", id, g_intellimouse);
+
+  // Enable data reporting
+  mouse_cmd(0xF4);
+  mouse_ack();
 
   // Start in the center of the screen
-  g_mouse.x = (int)(g_fb_width  / 2);
+  g_mouse.x = (int)(g_fb_width / 2);
   g_mouse.y = (int)(g_fb_height / 2);
 
   register_interrupt_handler(44, on_mouse_irq);
@@ -134,5 +174,6 @@ void mouse_init(void) {
 mouse_state mouse_read_state(void) {
   mouse_state s = g_mouse;
   g_mouse.pending = 0;
+  g_mouse.scroll = 0;
   return s;
 }

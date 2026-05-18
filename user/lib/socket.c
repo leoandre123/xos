@@ -23,8 +23,12 @@ int socket_send(socket socket, void *buf, int len) {
 void socket_close(socket socket) { syscall(SYS_SOCKET_CLOSE, socket, 0, 0); }
 
 // UDP
-socket socket_udp_open() {}
-int socket_udp_send(socket s, ipv4_addr dst, ushort dst_port, void *buf,
-                    int len) {}
-int socket_udp_recv(socket s, void *buf, int len, ipv4_addr *src,
-                    ushort *src_port) {}
+socket socket_udp_open(ipv4_addr remote, ushort remote_port, ushort local_port) {
+  return syscall(SYS_SOCKET_UDP, remote.value, remote_port, local_port);
+}
+int socket_udp_send(socket s, const void *buf, int len) {
+  return syscall(SYS_SOCKET_SEND, s, (ulong)buf, len);
+}
+int socket_udp_recv(socket s, void *buf, int len) {
+  return syscall(SYS_SOCKET_RECEIVE, s, (ulong)buf, len);
+}

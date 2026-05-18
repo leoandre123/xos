@@ -2,14 +2,18 @@
 #include "cdefs.h"
 
 #include "fb_info.h"
-#include "font.h"
 #include "gfx.h"
+#include "rect.h"
 #include "window/ui/retained_ui.h"
-#include <string.h>
 
 EXTERN_C_BEGIN
 
-extern fb_info *fb;
+extern fb_info g_ui_current_fb;
+extern int g_ui_current_buffer_idx;
+
+extern bool g_full_dirty[2];
+extern rect g_current_dirty_rect;
+extern ulong g_ui_current_time;
 
 #define WITH_PADDING(width, height, p)                                         \
   ((ui_size){.w = width + p + p, .h = height + p + p})
@@ -24,31 +28,45 @@ extern fb_info *fb;
     _node;                                                                     \
   })
 
+#define LAYOUT_NODE(n, s, p) n->layout(n, s, p)
+
+#define PT_IN_RECT(px, py, rx, ry, rw, rh)                                     \
+  (px >= rx && px < rx + rw && py >= ry && py < ry + rh)
+
 static void layout_simple(ui_node *node, ui_size size, ui_pos pos) {
   node->calculated_size = size;
   node->calculated_pos = pos;
 }
 
-extern int s_dirty_count;
+// extern int s_dirty_count;
 
 static void draw_node_bg(ui_node *node) {
-  uint color = (node->hovered && node->bg_hover) ? node->bg_hover : node->bg_color;
+  uint color =
+      (node->hovered && node->bg_hover) ? node->bg_hover : node->bg_color;
   if (color)
-    gfx_rect(fb, node->calculated_pos.x, node->calculated_pos.y,
+    gfx_rect(&g_ui_current_fb, node->calculated_pos.x, node->calculated_pos.y,
              node->calculated_size.w, node->calculated_size.h, color);
 }
 
-static inline void draw_node(ui_node *node, bool parent_dirty) {
-  bool should_draw = node->dirty || parent_dirty;
-  if (should_draw) {
-    s_dirty_count++;
-    draw_node_bg(node);
-    if (node->draw)
-      node->draw(node);
-    node->dirty = false;
-  }
-  for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    draw_node(child, should_draw);
+static inline bool node_intersects_dirty(ui_node *node) {
+  return g_full_dirty[g_ui_current_buffer_idx]
+             ? true
+             : rect_intersect(node->calculated_rect, g_current_dirty_rect).w;
+}
+
+static inline void draw_node(ui_node *node) {
+  if (!node_intersects_dirty(node))
+    return;
+  // s_dirty_count++;
+  draw_node_bg(node);
+  if (node->draw)
+    node->draw(node);
+
+  if (!node->draws_children) {
+    for (ui_node *child = node->first_child; child;
+         child = child->next_sibling) {
+      draw_node(child);
+    }
   }
 }
 

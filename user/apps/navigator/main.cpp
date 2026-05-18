@@ -1,24 +1,25 @@
-#include "fb_info.h"
+#include "elf_icon.h"
 #include "fs/file.h"
 #include "gfx.h"
 #include "image.h"
 #include "stdio.h"
 #include "string.h"
 #include "syscall.h"
-#include "window/ui/immediate_ui.h"
 #include "window/ui/retained_ui.h"
 #include "window/window.h"
 #include "window_event.h"
 
 #define ROW_COUNT 20
 #define MAX_PATH 255
+#define MAX_ENTRIES 100
 
 static bitmap *g_folder;
 static bitmap *g_file;
 static bitmap *g_gear;
 
 static char g_path[MAX_PATH] = "/";
-static dirent g_entries[100];
+static dirent g_entries[MAX_ENTRIES];
+static bitmap *g_entry_icons[MAX_ENTRIES];
 static int g_entry_count = 0;
 static int g_page = 0;
 
@@ -58,18 +59,52 @@ static void format_file_size(char *buf, int size) {
   }
 }
 
-static bitmap *get_file_icon(dirent *entry) {
-  if (entry->is_dir) {
+static bool is_elf(const char *name) {
+  return str_ends_with(name, ".elf") || str_ends_with(name, ".ELF");
+}
+
+static bitmap *get_file_icon(int idx) {
+  dirent *entry = &g_entries[idx];
+  if (entry->is_dir)
     return g_folder;
-  } else if (str_ends_with(entry->name, ".ELF")) {
+  if (g_entry_icons[idx])
+    return g_entry_icons[idx];
+  if (is_elf(entry->name))
     return g_gear;
-  } else {
-    return g_file;
+  return g_file;
+}
+
+static void free_entry_icons() {
+  for (int i = 0; i < MAX_ENTRIES; i++) {
+    if (g_entry_icons[i]) {
+      bitmap *bm = g_entry_icons[i];
+      ulong sz = (ulong)(bm->width * bm->height * sizeof(uint)) + 2 * sizeof(uint);
+      sys_free(bm, sz);
+      g_entry_icons[i] = 0;
+    }
+  }
+}
+
+static void load_entry_icons() {
+  char path[MAX_PATH + 248];
+  int plen = strlen(g_path);
+  for (int i = 0; i < g_entry_count; i++) {
+    if (g_entries[i].is_dir || !is_elf(g_entries[i].name))
+      continue;
+    int j = 0;
+    for (; j < plen; j++) path[j] = g_path[j];
+    if (plen > 1) path[j++] = '/';
+    const char *n = g_entries[i].name;
+    while (*n) path[j++] = *n++;
+    path[j] = '\0';
+    g_entry_icons[i] = elf_icon_load(path);
   }
 }
 
 static void refresh_list() {
-  g_entry_count = file_readdir(g_path, g_entries, 100);
+  free_entry_icons();
+  g_entry_count = file_readdir(g_path, g_entries, MAX_ENTRIES);
+  load_entry_icons();
 }
 
 static void redraw() {
@@ -81,7 +116,7 @@ static void redraw() {
     int idx = g_page * ROW_COUNT + row;
     bool is_entry = idx < g_entry_count;
 
-    ui_img_set_img(child, is_entry ? get_file_icon(&g_entries[idx]) : 0);
+    ui_img_set_img(child, is_entry ? get_file_icon(idx) : 0);
     child = child->next_sibling;
 
     ui_label_set_text(child, is_entry ? g_entries[idx].name : "");
@@ -115,17 +150,16 @@ void on_up_clicked(ui_node *btn) {
 
 int main(void) {
 
-  window_handle w = window_open(600, 500, "Navigator");
+  window_handle w = window_open(600, 350, "Navigator");
 
   g_folder = img_load("/sys/icons/folder.lbm");
   g_file = img_load("/sys/icons/file.lbm");
   g_gear = img_load("/sys/icons/gear.lbm");
 
-  fb_info fb;
-  window_get_framebuffer(w, &fb);
-  ui_node *root = ui_create_root(&fb);
+  ui_node *root = ui_create_root();
   root->bg_color = RGB(232, 230, 228);
   ui_set_perf(true);
+  // ui_set_debug_dirty(true);
   ui_node *vstack = ui_vstack(root, 8, ALIGN_STRETCH);
   ui_node *toolbar = ui_hstack(vstack, 8, ALIGN_CENTER);
   ui_node *btn0 = rui_button(toolbar, "btn0");
@@ -139,7 +173,11 @@ int main(void) {
   g_path_lbl->bg_color = RGB(200, 200, 200);
   ui_text_field(path_bar);
   rui_button(path_bar, "Up")->on_click = on_up_clicked;
-  g_grid = ui_grid(vstack, 3, ROW_COUNT + 1, 4);
+
+  ui_node *scroll_container = ui_scroll_container(vstack, SCROLL_VERTICAL);
+  scroll_container->expand = true;
+
+  g_grid = ui_grid(scroll_container, 3, ROW_COUNT + 1, 4);
   g_grid->bg_color = RGB(232, 230, 228);
   g_grid->grid.on_row_click = on_dir_clicked;
   g_grid->grid.header_color = RGB(150, 150, 150);
@@ -164,12 +202,21 @@ int main(void) {
   while (1) {
     window_event ev;
     while (window_poll_event(w, &ev)) {
-      ui_update(ev);
+      if (ev.type == WET_CREATE) {
+        ui_init(ev.create_event.width, ev.create_event.height,
+                ev.create_event.pitch);
+      } else if (ev.type == WET_PAINT) {
+        if (!ev.paint_event.paint_handle) {
+          sys_write("ERROR FB EMPTY");
+          for (;;)
+            sys_yield();
+        }
+        ui_render(ev.paint_event.paint_handle);
+        window_end_paint(w);
+      } else {
+        ui_update(ev);
+      }
     }
-
-    ui_render((ui_size){.w = static_cast<ushort>(fb.width),
-                        .h = static_cast<ushort>(fb.height)});
-    window_end_paint(w);
     sys_yield();
   }
 

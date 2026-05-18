@@ -49,7 +49,7 @@ static page_table *get_table(page_table *table, ulong index) {
   }
   return 0;
 }
-static void vmm_unmap_and_free_pages(address_space *space, ulong virtual_addr, ulong page_count) {
+void vmm_unmap_and_free_pages(address_space *space, ulong virtual_addr, ulong page_count) {
   for (ulong i = 0; i < page_count; i++) {
     ulong virt = virtual_addr + i * PAGE_SIZE;
 
@@ -61,15 +61,16 @@ static void vmm_unmap_and_free_pages(address_space *space, ulong virtual_addr, u
     page_table *pml4 = space->pml4;
     page_table *pdpt = get_table(pml4, pml4_index);
     if (!pdpt)
-      return;
+      continue;
     page_table *pd = get_table(pdpt, pdpt_index);
     if (!pd)
-      return;
+      continue;
     page_table *pt = get_table(pd, pd_index);
     if (!pt)
-      return;
+      continue;
     pmm_free_page(pt->entries[pt_index] & PAGE_ADDR_MASK);
     pt->entries[pt_index] = 0;
+    __asm__ volatile("invlpg (%0)" ::"r"(virt) : "memory");
   }
 }
 
@@ -206,20 +207,24 @@ ulong vmm_setup_stack() {
 ulong vmm_virt_to_phys(address_space *space, ulong virt) {
   ulong pml4_index = (virt >> 39) & 0x1FF;
   ulong pdpt_index = (virt >> 30) & 0x1FF;
-  ulong pd_index   = (virt >> 21) & 0x1FF;
-  ulong pt_index   = (virt >> 12) & 0x1FF;
-  ulong offset     = virt & 0xFFF;
+  ulong pd_index = (virt >> 21) & 0x1FF;
+  ulong pt_index = (virt >> 12) & 0x1FF;
+  ulong offset = virt & 0xFFF;
 
   page_table *pml4 = space->pml4;
   page_table *pdpt = get_table(pml4, pml4_index);
-  if (!pdpt) return 0;
+  if (!pdpt)
+    return 0;
   page_table *pd = get_table(pdpt, pdpt_index);
-  if (!pd) return 0;
+  if (!pd)
+    return 0;
   page_table *pt = get_table(pd, pd_index);
-  if (!pt) return 0;
+  if (!pt)
+    return 0;
 
   ulong entry = pt->entries[pt_index];
-  if (!(entry & PAGE_PRESENT)) return 0;
+  if (!(entry & PAGE_PRESENT))
+    return 0;
   return (entry & PAGE_ADDR_MASK) | offset;
 }
 

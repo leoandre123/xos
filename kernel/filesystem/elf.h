@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filesystem/file.h"
+#include "memory/vmm.h"
 #include "scheduler/task.h"
 #include "types.h"
 
@@ -43,4 +44,5 @@ typedef struct {
   ulong alignment;
 } __attribute__((packed)) elf_program_header;
 
-task *elf_load(file_handle file_handle, const char *name, const char *wd);
+// Loads an elf executable into the provided address space, return pointer to entry
+void *elf_load(file_handle file_handle, address_space *space);

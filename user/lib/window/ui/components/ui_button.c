@@ -9,10 +9,10 @@ static ui_size ps_button(ui_node *node) {
 }
 
 static void draw_button(ui_node *node) {
-  gfx_rect(fb, node->calculated_pos.x, node->calculated_pos.y,
+  gfx_rect(&g_ui_current_fb, node->calculated_pos.x, node->calculated_pos.y,
            node->calculated_size.w, node->calculated_size.h,
            node->hovered ? node->bg_hover : node->bg_color);
-  gfx_str(fb, node->calculated_pos.x + node->padding,
+  gfx_str(&g_ui_current_fb, node->calculated_pos.x + node->padding,
           node->calculated_pos.y + node->padding, node->button.text,
           node->button.color);
 }

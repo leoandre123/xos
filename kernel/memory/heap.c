@@ -117,13 +117,22 @@ void *kmalloc(ulong size) {
   return ((ubyte *)free_block) + sizeof(heap_block);
 }
 void kfree(void *addr) {
-  heap_block *block = g_heap.first_block;
-  while (block) {
-    if (block == (heap_block *)(addr - sizeof(heap_block))) {
-      block->free = 1;
-      return;
-    }
-    block = block->next;
+  heap_block *block = (heap_block *)((ubyte *)addr - sizeof(heap_block));
+  block->free = 1;
+
+  // coalesce with next block
+  if (block->next && block->next->free) {
+    block->payload_size += sizeof(heap_block) + block->next->payload_size;
+    block->next = block->next->next;
+    if (block->next)
+      block->next->prev = block;
+  }
+  // coalesce with previous block
+  if (block->prev && block->prev->free) {
+    block->prev->payload_size += sizeof(heap_block) + block->payload_size;
+    block->prev->next = block->next;
+    if (block->next)
+      block->next->prev = block->prev;
   }
 }
 

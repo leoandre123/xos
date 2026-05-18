@@ -4,14 +4,11 @@
 #include "cpu/idt.h"
 #include "cpu/syscall.h"
 #include "filesystem/elf.h"
-#include "filesystem/fat32.h"
 #include "filesystem/file.h"
 #include "filesystem/filesystem.h"
 #include "graphics/console.h"
 #include "graphics/gfx.h"
 #include "graphics/image.h"
-#include "io/ata.h"
-#include "io/e1000.h"
 #include "io/keyboard.h"
 #include "io/logging.h"
 #include "io/mouse.h"
@@ -33,6 +30,7 @@
 #include "net/net.h"
 #include "net/networking.h"
 #include "panic.h"
+#include "scheduler/process_manager.h"
 #include "scheduler/scheduler.h"
 #include <stddef.h>
 
@@ -161,44 +159,38 @@ void kernel_main() {
   scheduler_init();
   klogf(LOG_DEBUG, "Scheduler initilized!");
 
+  // TODO: Move to system process
   // Read /init to pick the first process ("d" → dafne, else terminal)
-  const char *init_elf = "/terminal.elf";
-  const char *init_name = "terminal";
-  file_handle init_cfg = file_open("/init");
-  if (init_cfg) {
-    char first = 0;
-    file_read(init_cfg, &first, 1);
-    if (first == 'd') {
-      init_elf = "/dafne.elf";
-      init_name = "dafne";
-    }
-    klogf(LOG_TRACE, "Init letter: %c(%d)", first, first);
-    klogf(LOG_INFO, "Init file loaded. Configuration: %s", init_name);
-  } else {
-    klogf(LOG_WARNING, "Failed to load init file");
-  }
+  // const char *init_elf = "/terminal.elf";
+  // const char *init_name = "terminal";
+  // file_handle init_cfg = file_open("/boot/init");
+  // if (init_cfg) {
+  //   char first = 0;
+  //   file_read(init_cfg, &first, 1);
+  //   if (first == 'd') {
+  //     init_elf = "/dafne.elf";
+  //     init_name = "dafne";
+  //   }
+  //   klogf(LOG_TRACE, "Init letter: %c(%d)", first, first);
+  //   klogf(LOG_INFO, "Init file loaded. Configuration: %s", init_name);
+  // } else {
+  //   klogf(LOG_WARNING, "Failed to load init file");
+  // }
 
-  file_handle term_file = file_open(init_elf);
-  if (!term_file)
-    panic("Cannot find init ELF on disk");
-  task *term_task = elf_load(term_file, init_name, "/");
-  if (!term_task)
+  pid init_pid = process_exec("/sys/programs/system.elf", -1, -1);
+
+  if (!init_pid) {
     panic("Failed to load init ELF");
-  klogf(LOG_DEBUG, "Tasks created!");
-
-  scheduler_add(term_task);
-
+  }
   klogf(LOG_DEBUG, "Tasks loaded!");
-  // scheduler_add(user_task);
 
   rtc_time t;
   rtc_read(&t);
   serial_printf("%04u-%02u-%02u %02u:%02u:%02u\n",
                 t.year, t.month, t.day, t.hour, t.minute, t.second);
 
-  timer_init(47);
+  timer_init(1000);
   if (!g_fast_boot) {
-    dhcp_send_discovery();
     klogf(LOG_DEBUG, "Sleep...");
     ksleep_ms(4000);
     klogf(LOG_DEBUG, "Done!");
@@ -210,7 +202,6 @@ void kernel_main() {
 
   time_init();
 
-  logging_set_screen_logging(false);
   if (!g_fast_boot) {
     gfx_clear(RGB(82, 50, 49));
     bitmap *logo = img_load("/logo.lbm");
@@ -219,6 +210,7 @@ void kernel_main() {
     ksleep_ms(4000);
   }
   klogf(LOG_INFO, "Starting scheduler...");
+  logging_set_screen_logging(false);
   scheduler_run();
 
   klogf(LOG_INFO, "Goodbye from kernel!");
