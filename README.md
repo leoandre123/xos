@@ -8,7 +8,7 @@ A custom x86-64 operating system written in C and NASM, booting via UEFI with a 
 
 **Terminal mode (QEMU):**
 ```bash
-./run.py        # preferred — rich progress UI
+./run.py
 ```
 
 **Desktop mode (dafne compositor):**
