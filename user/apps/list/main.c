@@ -169,7 +169,7 @@ static void run(char *cmd, char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
 
   if (strcmp(cmd, "exit") == 0) {
     out("Bye!\n");
-    sys_exit();
+    sys_exit(0);
   }
   if (strcmp(args[0], "cd") == 0) {
     cmd_cd(args, arg_count);

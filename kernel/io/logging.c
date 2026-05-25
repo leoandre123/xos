@@ -1,7 +1,6 @@
 #include "logging.h"
 #include "graphics/console.h"
 #include "io/serial.h"
-#include "net/networking.h"
 #include "net_types.h"
 #include "types.h"
 #include "utils/formatting.h"
@@ -20,7 +19,7 @@ static bool g_netlog_in_send = false;
 #define NETLOG_SRC_PORT 1234
 
 void netlog_send(const char *buf, ushort msg_len) {
-  if (!g_netlog_enabled || !g_main_driver || g_netlog_in_send)
+  if (!g_netlog_enabled || g_netlog_in_send)
     return;
   if (msg_len > NETLOG_MAX_LINE)
     msg_len = NETLOG_MAX_LINE;

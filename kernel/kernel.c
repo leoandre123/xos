@@ -3,8 +3,6 @@
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
 #include "cpu/syscall.h"
-#include "filesystem/elf.h"
-#include "filesystem/file.h"
 #include "filesystem/filesystem.h"
 #include "graphics/console.h"
 #include "graphics/gfx.h"
@@ -24,7 +22,6 @@
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
-#include "net/dhcp.h"
 #include "net/dns.h"
 #include "net/icmp.h"
 #include "net/net.h"
@@ -139,8 +136,8 @@ void kernel_main() {
   // Windows drops packets with src 0.0.0.0 before they reach Python/nc.
   // Set XOS to any unused IP on your ethernet adapter's subnet.
   // Windows adapter: Control Panel → ethernet → IPv4 → 192.168.100.1 / 255.255.255.0
-  g_ip = ipv4(192, 168, 215, 200);
-  logging_enable_network(ipv4(255, 255, 255, 255), 9999);
+  // g_ip = ipv4(192, 168, 215, 200);
+  // logging_enable_network(ipv4(255, 255, 255, 255), 9999);
 
   klogf(LOG_INFO, "NETWORK LOGGING ENABLED");
 
@@ -177,7 +174,7 @@ void kernel_main() {
   //   klogf(LOG_WARNING, "Failed to load init file");
   // }
 
-  pid init_pid = process_exec("/sys/programs/system.elf", -1, -1);
+  pid init_pid = process_exec("/sys/programs/system.elf", -1, -1, 0, 0);
 
   if (!init_pid) {
     panic("Failed to load init ELF");

@@ -1,4 +1,5 @@
 #include "socket.h"
+#include "io/logging.h"
 #include "io/serial.h"
 #include "memory/memutils.h"
 #include "net/ip.h"
@@ -7,11 +8,13 @@
 #include "panic.h"
 #include "scheduler/scheduler.h"
 #include "syscall.h"
+#include "types.h"
+#include "utils/math.h"
 
 static raw_socket g_raw_sockets[MAX_RAW_SOCKETS];
 static socket_id g_next_socket_id = 1;
 
-static inline socket_id get_socket_id() {
+static inline socket_id generate_socket_id() {
   return g_next_socket_id++;
 }
 
@@ -20,38 +23,95 @@ void socket_init() {
   udp_init();
 }
 
-socket_handle socket_tcp_client(ipv4_addr remote_addr, ushort remote_port, ushort local_port) {
-  socket_id id = get_socket_id();
-  tcp_error err = tcp_active(id, remote_addr, remote_port, local_port);
+socket_handle socket(socket_protocol protocol) {
+  socket_id id = generate_socket_id();
+  int err = 0;
+  switch (protocol) {
+  case SOCKET_RAW:
+    break;
+  case SOCKET_ICMP:
+    break;
+  case SOCKET_TCP:
+    err = tcp_socket(id);
+    break;
+  case SOCKET_UDP:
+    err = udp_create_socket(id);
+    break;
+  }
   if (err) {
     return (socket_handle){.id = 0};
   }
-  return (socket_handle){.id = id, .protocol = SOCKET_TCP};
-}
-socket_handle socket_tcp_server(ushort local_port) {
-  socket_id id = get_socket_id();
-  tcp_error err = tcp_passive(id, local_port);
-  if (err) {
-    return (socket_handle){.id = 0};
-  }
-  return (socket_handle){.id = id, .protocol = SOCKET_TCP};
+  return (socket_handle){.id = id, .protocol = protocol};
 }
 
-socket_handle socket_udp(ipv4_addr remote_addr, ushort remote_port, ushort local_port) {
-  socket_id id = get_socket_id();
-  udp_error err = udp_open_socket(id, remote_addr, remote_port, local_port);
-  if (err) {
-    serial_printf("SOCKET_UDP ERROR %d\n", err);
-    return (socket_handle){.id = 0};
+int socket_bind(socket_handle h, socket_addr *local) {
+  int err = 0;
+  switch (h.protocol) {
+  case SOCKET_RAW:
+    break;
+  case SOCKET_ICMP:
+    break;
+  case SOCKET_TCP:
+    err = tcp_bind(h.id, local);
+    break;
+  case SOCKET_UDP:
+    err = udp_bind_socket(h.id, local);
+    break;
   }
-  return (socket_handle){.id = id, .protocol = SOCKET_UDP};
+  return err;
+}
+
+int socket_bind_nic(socket_handle h, int nic_id) {
+  int err = 0;
+  switch (h.protocol) {
+  case SOCKET_UDP:
+    err = udp_bind_nic(h.id, nic_id);
+    break;
+  default:
+    panic("Not implemented");
+  }
+  return err;
+}
+
+int socket_listen(socket_handle h) {
+  int err = 0;
+  switch (h.protocol) {
+  case SOCKET_RAW:
+    break;
+  case SOCKET_ICMP:
+    break;
+  case SOCKET_TCP:
+    err = tcp_listen(h.id);
+    break;
+  case SOCKET_UDP:
+    err = udp_listen_socket(h.id);
+    break;
+  }
+  return err;
+}
+
+int socket_connect(socket_handle h, socket_addr *remote) {
+  int err = 0;
+  switch (h.protocol) {
+  case SOCKET_RAW:
+    break;
+  case SOCKET_ICMP:
+    break;
+  case SOCKET_TCP:
+    err = tcp_connect(h.id, remote);
+    break;
+  case SOCKET_UDP:
+    err = udp_connect(h.id, remote);
+    break;
+  }
+  return err;
 }
 
 socket_handle socket_accept(socket_handle handle) {
   if (handle.protocol != SOCKET_TCP)
     panic("INVALID USE");
 
-  socket_id new_id = get_socket_id();
+  socket_id new_id = generate_socket_id();
 
   while (!tcp_accept(new_id, handle.id)) {
     schedule();
@@ -102,20 +162,11 @@ void socket_on_data(void *data, ushort data_len) {
 }
 
 int socket_recv(socket_handle handle, void *buf, ushort len) {
-  int read_len;
   switch (handle.protocol) {
   case SOCKET_TCP:
-    do {
-      read_len = tcp_receive(handle.id, buf, len);
-      schedule();
-    } while (!read_len);
-    return read_len;
+    return tcp_receive(handle.id, buf, len);
   case SOCKET_UDP:
-    do {
-      read_len = udp_receive(handle.id, buf, len);
-      schedule();
-    } while (!read_len);
-    return read_len;
+    return udp_receive(handle.id, buf, len);
   default:
     panic("Not implemented");
     return 0;
@@ -142,6 +193,7 @@ int socket_send(socket_handle handle, void *buf, ushort len) {
 int socket_queue_write(socket_queue *queue, void *data, ushort len) {
   if ((queue->head + 1) % SOCKET_QUEUE_SIZE == queue->tail) {
     // buffer is full, avoid overflow
+    klogf(LOG_WARNING, "Packet dropped for: buffer full");
     return 0;
   }
   queue->packets[queue->head].len = len;
@@ -154,11 +206,21 @@ int socket_queue_read(socket_queue *queue, void *data, ushort max_len) {
     // buffer is empty
     return 0;
   }
-  if (queue->packets[queue->tail].len > max_len)
-    return 0;
+  ushort copy_len = MIN(queue->packets[queue->tail].len, max_len);
 
-  memcpy8(data, queue->packets[queue->tail].data, queue->packets[queue->tail].len);
+  memcpy8(data, queue->packets[queue->tail].data, copy_len);
 
   queue->tail = (queue->tail + 1) % SOCKET_QUEUE_SIZE;
   return 1;
+}
+
+bool socket_set_receiver(socket_handle handle, task *t) {
+  switch (handle.protocol) {
+  case SOCKET_TCP:
+    return tcp_set_receiver(handle.id, t);
+  case SOCKET_UDP:
+    return udp_set_receiver(handle.id, t);
+  default:
+    panic("Not implemented");
+  }
 }

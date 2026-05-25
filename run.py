@@ -200,12 +200,12 @@ def populate_data(image, init_mode):
     ok("Data partition")
 
 
-def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug):
+def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug, ps2):
     section("QEMU")
 
     drives   = ["-drive", f"if=pflash,format=raw,readonly=on,file={code_fd}",
                 "-drive", f"if=pflash,format=raw,file={ovmf_vars}"]
-    usb_devs = ["-device", "usb-kbd,bus=xhci.0"]
+    usb_devs = [] if ps2 else ["-device", "usb-kbd,bus=xhci.0"]
 
     if drive_mode == "usb":
         drives   += ["-drive", f"id=usbdrive,format=raw,file={image},if=none"]
@@ -219,6 +219,7 @@ def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug):
     info.add_row("Drive", drive_mode)
     info.add_row("Image", os.path.basename(image))
     info.add_row("RAM",   "256 MB")
+    info.add_row("Keyboard", "PS/2" if ps2 else "USB HID")
     if debug:
         info.add_row("Debug", "GDB on :1234")
 
@@ -274,6 +275,7 @@ def main():
     parser.add_argument("--debug", "-d", action="store_true")
     parser.add_argument("--pxe",         action="store_true")
     parser.add_argument("--fast-boot",   action="store_true")
+    parser.add_argument("--ps2",         action="store_true", help="Use PS/2 keyboard instead of USB HID")
     parser.set_defaults(init_mode="terminal", drive_mode="ata")
     args = parser.parse_args()
 
@@ -307,7 +309,7 @@ def main():
 
     create_image(image)
     populate_data(image, args.init_mode)
-    launch_qemu(image, args.drive_mode, code_fd, ovmf_vars, args.debug)
+    launch_qemu(image, args.drive_mode, code_fd, ovmf_vars, args.debug, args.ps2)
 
 
 if __name__ == "__main__":

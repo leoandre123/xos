@@ -1,6 +1,7 @@
 #pragma once
 #include "cdefs.h"
 #include "syscall.h"
+#include "syscalls.h"
 
 EXTERN_C_BEGIN
 
@@ -56,5 +57,7 @@ static inline datetime time_now(void) {
   ulong ts = sys_time();
   return to_datetime(ts);
 }
+
+static inline void sleep(ulong ms) { syscall(SYS_SLEEP, ms, 0, 0); }
 
 EXTERN_C_END

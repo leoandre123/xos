@@ -203,6 +203,7 @@ int main(void) {
   sys_write("running navigator\n");
   sys_exec("/sys/programs/navigator.elf");
   sys_exec("/sys/programs/performance_monitor.elf");
+  sys_exec("/sys/programs/terminal_2.elf");
   sys_read_mouse(&g_mouse);
 
   sys_write("running loop");

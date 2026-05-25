@@ -191,7 +191,7 @@ static void run(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
 
   if (strcmp(args[0], "exit") == 0) {
     out("Bye!\n");
-    sys_exit();
+    sys_exit(00);
   }
   if (strcmp(args[0], "cd") == 0) {
     cmd_cd(args, arg_count);
@@ -210,27 +210,32 @@ static void run(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
     return;
   }
 
-  char path[MAX_CMD + 2];
+  char path[MAX_CMD + 32];
   int i = 0;
-  if (args[0][0] != '/')
-    path[i++] = '/';
+  if (args[0][0] != '/') {
+    const char *prefix = "/sys/programs/";
+    for (int j = 0; prefix[j]; j++)
+      path[i++] = prefix[j];
+  }
   for (int j = 0; args[0][j]; j++)
     path[i++] = args[0][j];
   path[i] = '\0';
 
+  const char *argv_ptrs[MAX_ARGS];
+  for (int j = 0; j < arg_count; j++)
+    argv_ptrs[j] = args[j];
+
   // Child inherits shell's stdin (fd 0) and stdout (fd 1).
-  // The child writes to fd 1 → same pipe the terminal reads → appears on
-  // screen.
-  int pid = sys_exec_fds(path, 0, 1);
-  if (pid < 0) {
+  int pid = sys_exec_argv(path, 0, 1, arg_count, argv_ptrs);
+  if (pid == 0) {
     path[i++] = '.';
     path[i++] = 'e';
     path[i++] = 'l';
     path[i++] = 'f';
     path[i++] = '\0';
-    pid = sys_exec_fds(path, 0, 1);
+    pid = sys_exec_argv(path, 0, 1, arg_count, argv_ptrs);
   }
-  if (pid < 0) {
+  if (pid == 0) {
     out("Unknown command: ");
     out(args[0]);
     out("\n");

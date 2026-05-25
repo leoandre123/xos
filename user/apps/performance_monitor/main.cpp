@@ -34,10 +34,20 @@ static void get_mem_info(mem_info *info) {
   syscall(SYS_STATS_MEMORY, (ulong)info, 0, 0);
 }
 
+static const char *get_state_string(proc_state state) {
+  switch (state) {
+
+  case PROC_READY: return "Ready";
+  case PROC_RUNNING: return "Running";
+  case PROC_BLOCKED: return "Blocked";
+  case PROC_DEAD: return "Dead";
+  }
+}
+
 static void redraw() {
   ui_mark_dirty(s_grid);
-  ui_node *child =
-      s_grid->first_child->next_sibling->next_sibling->next_sibling;
+  ui_node *child = s_grid->first_child->next_sibling->next_sibling->next_sibling
+                       ->next_sibling;
   char buf[30];
   for (int row = 0; row < ROW_COUNT; row++) {
     bool is_entry = row < s_info_count;
@@ -50,6 +60,10 @@ static void redraw() {
     ui_label_set_text(child, is_entry ? s_infos[row].name : "");
     child = child->next_sibling;
 
+    ui_label_set_text(child,
+                      is_entry ? get_state_string(s_infos[row].state) : "");
+    child = child->next_sibling;
+
     // if (is_entry) {
     //   format_file_size(buf, g_entries[idx].file_size);
     // }
@@ -58,18 +72,26 @@ static void redraw() {
   }
 }
 
+static void update_proc_list() {
+  s_info_count = process_list(s_infos, ROW_COUNT);
+}
+
+static void on_refresh(ui_node *node) {
+  update_proc_list();
+  redraw();
+}
+
 void create_list_tab(ui_node *tabs) {
   ui_node *list_tab = ui_tab(tabs, "Processes");
   ui_node *vstack = ui_vstack(list_tab, 8, ALIGN_STRETCH);
   ui_node *toolbar = ui_hstack(vstack, 8, ALIGN_CENTER);
-  ui_node *btn0 = rui_button(toolbar, "btn0");
-  ui_node *btn1 = rui_button(toolbar, "Button 1");
-  ui_node *btn2 = rui_button(toolbar, "LONG Button 2");
+  ui_node *refresh = rui_button(toolbar, "Refresh");
+  refresh->on_click = on_refresh;
 
   ui_node *scroll_container = ui_scroll_container(vstack, SCROLL_VERTICAL);
   scroll_container->expand = true;
 
-  s_grid = ui_grid(scroll_container, 3, ROW_COUNT + 1, 4);
+  s_grid = ui_grid(scroll_container, 4, ROW_COUNT + 1, 4);
   s_grid->bg_color = RGB(232, 230, 228);
   // s_grid->grid.on_row_click = on_dir_clicked;
   s_grid->grid.header_color = RGB(150, 150, 150);
@@ -77,13 +99,15 @@ void create_list_tab(ui_node *tabs) {
   s_grid->grid.row_hover_color = RGB(100, 100, 100);
 
   ui_grid_set_col_sizing(s_grid, GRID_SIZING_FIT_CONTENT, GRID_SIZING_EXPAND,
-                         GRID_SIZING_FIT_CONTENT);
+                         GRID_SIZING_FIT_CONTENT, GRID_SIZING_FIT_CONTENT);
 
   ui_label(s_grid, "PID");
   ui_label(s_grid, "Name");
+  ui_label(s_grid, "State");
   ui_label(s_grid, "Actions");
 
   for (int i = 0; i < ROW_COUNT; i++) {
+    ui_label(s_grid, "");
     ui_label(s_grid, "");
     ui_label(s_grid, "");
     rui_button(s_grid, "Kill");
@@ -135,8 +159,8 @@ int main(void) {
   create_list_tab(tabs);
   create_perf_tab(tabs);
 
-  s_info_count = process_list(s_infos, ROW_COUNT);
-
+  // s_info_count = process_list(s_infos, ROW_COUNT);
+  update_proc_list();
   redraw();
   while (1) {
     window_event ev;

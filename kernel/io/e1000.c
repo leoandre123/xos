@@ -1,7 +1,10 @@
 #include "e1000.h"
 #include "io/logging.h"
+#include "io/pci.h"
 #include "memory/heap.h"
 #include "memory/vmm.h"
+#include "net/drivers/ethernet_driver.h"
+#include "net/ethernet.h"
 #include "net_types.h"
 #include "types.h"
 
@@ -52,7 +55,7 @@
 #define E1000_RXD_STAT_EOP (1 << 1) // End of packet
 
 #define TX_DESC_COUNT  8
-#define RX_DESC_COUNT  8
+#define RX_DESC_COUNT  64
 #define RX_BUFFER_SIZE 2048
 
 // Transmit descriptor (16 bytes)
@@ -84,7 +87,7 @@ static int tx_tail = 0;
 static int rx_tail = 0;
 static mac_addr g_mac;
 
-void ethernet_receive(ubyte *data, ushort len);
+// void ethernet_receive(ubyte *data, ushort len);
 
 static uint e1000_read(uint reg) {
   return *((volatile uint *)(mmio_base + reg));
@@ -98,12 +101,12 @@ static void e1000_write(uint reg, uint val) {
 static void e1000_read_mac(mac_addr *mac) {
   uint ral = e1000_read(E1000_RAL);
   uint rah = e1000_read(E1000_RAH);
-  mac->parts[0] = (ral >>  0) & 0xFF;
-  mac->parts[1] = (ral >>  8) & 0xFF;
+  mac->parts[0] = (ral >> 0) & 0xFF;
+  mac->parts[1] = (ral >> 8) & 0xFF;
   mac->parts[2] = (ral >> 16) & 0xFF;
   mac->parts[3] = (ral >> 24) & 0xFF;
-  mac->parts[4] = (rah >>  0) & 0xFF;
-  mac->parts[5] = (rah >>  8) & 0xFF;
+  mac->parts[4] = (rah >> 0) & 0xFF;
+  mac->parts[5] = (rah >> 8) & 0xFF;
 }
 
 static void e1000_init_rx(void) {
@@ -140,7 +143,10 @@ static void e1000_init_tx(void) {
   e1000_write(E1000_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP);
 }
 
-void e1000_init(ulong mmio_phys) {
+void e1000_init(ubyte bus, ubyte dev, ubyte func) {
+  pci_enable_bus_master(bus, dev, func);
+  ulong mmio_phys = pci_get_bar(bus, dev, func);
+
   vmm_map_bytes(&g_kernel_address_space,
                 (ulong)PHYS_TO_HHDM(mmio_phys), mmio_phys,
                 128 * 1024, PAGE_PRESENT | PAGE_WRITABLE | PAGE_CACHE_DISABLE);
@@ -148,7 +154,7 @@ void e1000_init(ulong mmio_phys) {
     ulong va = (ulong)PHYS_TO_HHDM(mmio_phys);
     ulong va_end = va + 128 * 1024;
     for (; va < va_end; va += 4096)
-      __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+      __asm__ volatile("invlpg (%0)" ::"r"(va) : "memory");
   }
 
   mmio_base = (volatile ubyte *)PHYS_TO_HHDM(mmio_phys);
@@ -162,12 +168,14 @@ void e1000_init(ulong mmio_phys) {
   // Spin without touching MMIO first, then poll with a bounded timeout.
   e1000_write(E1000_CTRL, ctrl_before | E1000_CTRL_RST);
   klogf(LOG_TRACE, "e1000: RST written, waiting...");
-  for (volatile int j = 0; j < 2000000; j++) ;
+  for (volatile int j = 0; j < 2000000; j++)
+    ;
   klogf(LOG_TRACE, "e1000: post-RST delay done, polling...");
 
   int rst_timeout = 1000;
   while ((e1000_read(E1000_CTRL) & E1000_CTRL_RST) && --rst_timeout)
-    for (volatile int j = 0; j < 10000; j++) ;
+    for (volatile int j = 0; j < 10000; j++)
+      ;
   klogf(LOG_TRACE, "e1000: RST poll done timeout_left=%d", rst_timeout);
   if (!rst_timeout) {
     klogf(LOG_ERROR, "e1000: reset timeout, NIC not responding");
@@ -196,9 +204,9 @@ void e1000_get_mac(mac_addr *mac_out) {
   *mac_out = g_mac;
 }
 
-void e1000_poll(void) {
+void e1000_poll(nic *nic) {
   while (rx_descs[rx_tail].status & E1000_RXD_STAT_DD) {
-    ethernet_receive(rx_buffers[rx_tail], rx_descs[rx_tail].length);
+    ethernet_receive(rx_buffers[rx_tail], rx_descs[rx_tail].length, nic);
     rx_descs[rx_tail].status = 0;
     e1000_write(E1000_RDT, rx_tail);
     rx_tail = (rx_tail + 1) % RX_DESC_COUNT;
@@ -217,3 +225,10 @@ void e1000_send(void *data, ushort len) {
   tx_tail = (tx_tail + 1) % TX_DESC_COUNT;
   e1000_write(E1000_TDT, tx_tail);
 }
+
+net_ops g_e1000_ops = {
+    .init = e1000_init,
+    .get_mac = e1000_get_mac,
+    .poll = e1000_poll,
+    .transmit = e1000_send,
+    .send = ethernet_driver_send};

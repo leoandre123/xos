@@ -3,15 +3,18 @@
 #include "io.h"
 #include "keys.h"
 #include "pic.h"
+#include "scheduler/scheduler.h"
+#include "scheduler/task.h"
 #include "serial.h"
 #include "types.h"
 
-static int extended = 0;
-static volatile KeyEvent g_last = {KEY_NONE, 0};
+#define MAX_KEYEVENTS 8
 
-// Source - https://stackoverflow.com/a/61192565
-// Posted by jonathan
-// Retrieved 2026-04-02, License - CC BY-SA 4.0
+static int extended = 0;
+// static volatile KeyEvent g_last = {KEY_NONE, 0};
+static KeyEvent s_key_queue[MAX_KEYEVENTS] = {0};
+static int s_key_queue_len = 0;
+static task *s_reading_task = 0;
 
 char kbd_US[128] =
     {
@@ -196,7 +199,17 @@ static char scancode_set1_to_ascii(ubyte sc) {
   }
 }
 
-void on_key_event(void) {
+static void on_key_event(KeyEvent ev) {
+  if (s_key_queue_len < MAX_KEYEVENTS) {
+    s_key_queue[s_key_queue_len++] = ev;
+  }
+  if (s_reading_task) {
+    task_set_ready(s_reading_task);
+    s_reading_task = 0;
+  }
+}
+
+void key_handler(void) {
   ubyte sc = inb(0x60);
 
   // Extended prefix
@@ -251,7 +264,7 @@ void on_key_event(void) {
   }
 
   if (ev.code != KEY_NONE) {
-    g_last = ev;
+    on_key_event(ev);
   }
 
   if (ev.character)
@@ -260,17 +273,30 @@ void on_key_event(void) {
 }
 
 void keyboard_init(void) {
-  register_interrupt_handler(33, (interrupt_handler_t)on_key_event);
+  register_interrupt_handler(33, (interrupt_handler_t)key_handler);
 }
 
-KeyEvent keyboard_last(void) {
-  KeyEvent event = g_last;
-  g_last.code = KEY_NONE;
-  g_last.character = 0;
-  return event;
+KeyEvent keyboard_read(void) {
+  KeyEvent ev = s_key_queue[0];
+
+  if (s_key_queue_len) {
+    for (int i = 0; i < s_key_queue_len; i++) {
+      s_key_queue[i] = s_key_queue[i + 1];
+    }
+    s_key_queue_len--;
+  }
+
+  return ev;
 }
 
 void keyboard_inject(KeyEvent ev) {
   if (ev.code != KEY_NONE)
-    g_last = ev;
+    on_key_event(ev);
+}
+
+bool keyboard_set_reader(task *t) {
+  if (s_reading_task)
+    return false;
+  s_reading_task = t;
+  return true;
 }

@@ -38,10 +38,13 @@ syscall_entry:
     push rdi
     push rsi
     push rdx
+    push r8
+    push r9
 
     ; Shuffle args to match C calling convention:
-    ;   syscall_dispatch(num, arg1, arg2, arg3)
-    ;   RDI=num, RSI=arg1, RDX=arg2, RCX=arg3
+    ;   syscall_dispatch(num, arg1, arg2, arg3, arg4, arg5)
+    ;   RDI=num, RSI=arg1, RDX=arg2, RCX=arg3, R8=arg4, R9=arg5
+    ; r8 and r9 already carry arg4/arg5 from user space, no move needed.
     mov rcx, rdx    ; arg3 (save first, rcx is about to be overwritten)
     mov rdx, rsi    ; arg2
     mov rsi, rdi    ; arg1
@@ -50,6 +53,8 @@ syscall_entry:
     call syscall_dispatch
     ; return value is in RAX
 
+    pop r9
+    pop r8
     pop rdx
     pop rsi
     pop rdi

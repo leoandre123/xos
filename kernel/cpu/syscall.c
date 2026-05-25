@@ -10,20 +10,25 @@
 #include "io/mouse.h"
 #include "io/serial.h"
 #include "io/time.h"
+#include "io/timer.h"
 #include "ipc/pipe.h"
 #include "keys.h"
 #include "mem_info.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
-#include "net/dhcp.h"
+#include "net/networking.h"
+#include "net/routing.h"
 #include "net/socket.h"
 #include "net_types.h"
+#include "nic_info.h"
 #include "process_info.h"
+#include "route_info.h"
 #include "scheduler/process.h"
 #include "scheduler/process_manager.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 #include "syscalls.h"
+#include "thread.h"
 #include "types.h"
 
 // Framebuffer globals defined in kernel.c
@@ -100,7 +105,7 @@ void syscall_init(void) {
   wrmsr(MSR_SYSCALL_MASK, 0x200);
 }
 
-ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
+ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4, ulong arg5) {
   (void)arg2;
   (void)arg3;
 
@@ -118,7 +123,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     return 0;
 
   case SYS_EXIT:
-    task_exit();
+    process_exit(arg1);
     return 0;
 
   case SYS_WRITE_CONSOLE:
@@ -126,38 +131,26 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     return 0;
 
   case SYS_READ_KEY: {
-    KeyEvent ev;
-    while ((ev = keyboard_last()).code == KEY_NONE)
-      __asm__ volatile("sti; hlt; cli");
+    KeyEvent ev = keyboard_read();
+    if (ev.code != KEY_NONE)
+      return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
+
+    task *t = scheduler_current();
+
+    if (!keyboard_set_reader(t))
+      return 0;
+    task_set_blocked(t);
+    schedule();
+    ev = keyboard_read();
     return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
   }
 
   case SYS_EXEC: {
-    return process_exec((const char *)arg1, (int)arg2, (int)arg3);
+    return process_exec((const char *)arg1, (int)arg2, (int)arg3, (int)arg4, (const char **)arg5);
   }
 
   case SYS_WAIT: {
-    if (arg1) {
-      task *t = scheduler_find((int)arg1);
-      if (!t)
-        return (ulong)-1;
-      while (t->state != TASK_DEAD)
-        schedule();
-      return arg1;
-    } else {
-      task *current_task = scheduler_current();
-      process *current_proc = current_task->owner;
-      if (!current_proc->first_child)
-        return 0;
-      while (1) {
-        for (process *child = current_proc->first_child; child; child = child->next_sibling) {
-          if (child->main_task->state == TASK_DEAD) {
-            return child->pid;
-          }
-        }
-        schedule();
-      }
-    }
+    return process_wait((pid)arg1);
   }
 
   case SYS_PIPE: {
@@ -216,7 +209,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   }
 
   case SYS_READ_KEY_NB: {
-    KeyEvent ev = keyboard_last();
+    KeyEvent ev = keyboard_read();
     if (ev.code == KEY_NONE)
       return 0;
     return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
@@ -277,12 +270,35 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
     __asm__ volatile("cli");
     return 0;
   }
+  case SYS_SLEEP: {
+    ulong now = timer_get_ticks();
+    ulong wakeup_tick = now + timer_ms_to_ticks(arg1);
+    task *t = scheduler_current();
+    if (sleep_queue_enqueue(t, wakeup_tick)) {
+      task_set_blocked(t);
+    }
+    schedule();
+    return 0;
+  }
 
   case SYS_PROCESS_EXEC:
-    return process_exec((const char *)arg1, (int)arg2, (int)arg3);
+    return process_exec((const char *)arg1, (int)arg2, (int)arg3, (int)arg4, (const char **)arg5);
 
   case SYS_PROCESS_LIST:
     return process_list((process_info *)arg1, arg2);
+
+#pragma region threads
+
+  case SYS_THREAD:
+    return process_spawn_thread((void(*))arg1, arg2);
+  case SYS_THREAD_JOIN:
+    return process_join_thread((thread_handle)arg1);
+  case SYS_THREAD_KILL:
+    process_kill_thread((thread_handle)arg1);
+    return 0;
+  case SYS_THREAD_EXIT:
+    process_exit_thread(arg1);
+#pragma endregion threads
 
   case SYS_FILE_OPEN:
     return (ulong)file_open((const char *)arg1);
@@ -297,27 +313,70 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3) {
   case SYS_FILE_SIZE:
     return ((file_handle)arg1)->size;
 
-  case SYS_SOCKET_UDP:
-    return socket_udp((ipv4_addr)(uint)arg1, (ushort)arg2, (ushort)arg3).value;
-  case SYS_NET_GET_MAC:
-    e1000_get_mac((mac_addr *)arg1);
-    return 0;
-  case SYS_NET_SET_IP:
-    g_ip = (ipv4_addr)(uint)arg1;
-    return 0;
-
-  case SYS_SOCKET_CONNECT:
-    return socket_tcp_client((ipv4_addr)(uint)arg1, (arg2), 0).value;
-  case SYS_SOCKET_LISTEN:
-    return socket_tcp_server(arg1).value;
-  case SYS_SOCKET_ACCEPT:
-    return socket_accept((socket_handle)(uint)arg1).value;
-  case SYS_SOCKET_RECEIVE:
-    return socket_recv((socket_handle)(uint)arg1, (void *)arg2, arg3);
-  case SYS_SOCKET_SEND:
-    return socket_send((socket_handle)(uint)arg1, (void *)arg2, arg3);
+  case SYS_SOCKET:
+    return socket(arg1).value_ulong;
   case SYS_SOCKET_CLOSE:
     socket_close((socket_handle)(uint)arg1);
+    return 0;
+  case SYS_SOCKET_BIND:
+    return (ulong)socket_bind((socket_handle)(uint)arg1, (socket_addr *)arg2);
+  case SYS_SOCKET_BIND_NIC:
+    return (ulong)socket_bind_nic((socket_handle)(uint)arg1, (int)arg2);
+  case SYS_SOCKET_LISTEN:
+    return socket_listen((socket_handle)arg1);
+  case SYS_SOCKET_ACCEPT:
+    return socket_accept((socket_handle)arg1).value_ulong;
+  case SYS_SOCKET_CONNECT:
+    return socket_connect((socket_handle)arg1, (socket_addr *)arg2);
+  case SYS_SOCKET_SEND:
+    return socket_send((socket_handle)arg1, (void *)arg2, arg3);
+  case SYS_SOCKET_RECEIVE: {
+    int read_len = socket_recv((socket_handle)arg1, (void *)arg2, arg3);
+    if (read_len)
+      return read_len;
+    task *t = scheduler_current();
+    if (!socket_set_receiver((socket_handle)arg1, t)) {
+      return 0;
+    }
+    task_set_blocked(t);
+    schedule();
+    return socket_recv((socket_handle)arg1, (void *)arg2, arg3);
+  }
+  case SYS_SOCKET_RECEIVE_NB:
+    return socket_recv((socket_handle)arg1, (void *)arg2, arg3);
+
+  case SYS_NET_GET_MAC:
+    if (arg1 < MAX_NICS)
+      g_nics[arg1].driver->get_mac((mac_addr *)arg2);
+    return 0;
+  case SYS_NET_SET_IP:
+    if (arg1 < MAX_NICS)
+      g_nics[arg1].addr = (ipv4_addr)(uint)arg2;
+    return 0;
+
+  case SYS_NET_NICS: {
+    int c = 0;
+    for (int i = 0; i < MAX_NICS; i++) {
+      if (g_nics[i].nic_id) {
+        nic_info *info = &((nic_info *)arg1)[c++];
+        info->nic_id = g_nics[i].nic_id;
+        info->addr = g_nics[i].addr;
+        info->netmask = g_nics[i].netmask;
+        info->default_gateway = g_nics[i].default_gateway;
+        info->is_up = g_nics[i].is_up;
+        if (c >= arg2) {
+          break;
+        }
+      }
+    }
+    return c;
+  }
+  case SYS_NET_ROUTES: {
+    return get_routes((route_info *)arg1, arg2);
+  }
+
+  case SYS_NET_CONF_NIC:
+    configure_nic(arg1, arg2, arg3);
     return 0;
 
   case SYS_WM_REGISTER: {

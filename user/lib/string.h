@@ -32,4 +32,12 @@ static inline int str_ends_with(const char *s, const char *suffix) {
   return 1;
 }
 
+static int strcmp(const char *a, const char *b) {
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
+  return *a - *b;
+}
+
 EXTERN_C_END

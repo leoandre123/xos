@@ -2,7 +2,6 @@
 #include "io/serial.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
-#include "net/dhcp.h"
 #include "net/ip.h"
 #include "net/net.h"
 #include "net/socket.h"
@@ -94,6 +93,11 @@ static inline tcp_passive_socket *create_passive(socket_id id, ushort local_port
   return 0;
 }
 
+int tcp_socket(socket_id id) {}
+int tcp_bind(socket_id, socket_addr *addr) {}
+int tcp_listen(socket_id id) {}
+int tcp_connect(socket_id id, socket_addr *remote) {}
+
 static inline void create_header(tcp_active_socket *conn, ubyte flags, tcp_header *header_out) {
   header_out->src_port = htons(conn->local_port);
   header_out->dst_port = htons(conn->remote_port);
@@ -107,7 +111,7 @@ static inline void create_header(tcp_active_socket *conn, ubyte flags, tcp_heade
 }
 
 static ushort tcp_checksum(tcp_active_socket *conn, void *segment, ushort segment_len) {
-  ipv4_addr src = conn->local_ip.value ? conn->local_ip : g_ip;
+  ipv4_addr src = conn->local_ip; // conn->local_ip.value ? conn->local_ip : g_ip;
   uint sum = 0;
 
   // Pseudo-header: build explicit big-endian 16-bit words from byte arrays
@@ -137,7 +141,7 @@ static void send_header(tcp_active_socket *conn, ubyte flags) {
     conn->seq++;
 
   header.checksum = tcp_checksum(conn, &header, sizeof(tcp_header));
-  ip_send(conn->remote_ip, PROTOCOL_TCP, &header, sizeof(tcp_header));
+  ip_send(conn->remote_ip, PROTOCOL_TCP, &header, sizeof(tcp_header), (ip_send_opts){});
 }
 
 static inline int is_port_used(ushort port) {
@@ -365,7 +369,7 @@ void tcp_send_buffered_data() {
       for (ushort i = 0; i < payload_len; i++)
         ((ubyte *)data)[sizeof(tcp_header) + i] = conn->send_buf[conn->send_tail++ % sizeof(conn->send_buf)];
       ((tcp_header *)data)->checksum = tcp_checksum(conn, data, data_len);
-      ip_send(conn->remote_ip, PROTOCOL_TCP, data, data_len);
+      ip_send(conn->remote_ip, PROTOCOL_TCP, data, data_len, (ip_send_opts){});
       kfree(data);
 
       conn->seq += payload_len;
@@ -401,4 +405,8 @@ int tcp_receive(uint conn_id, void *data, ushort data_len) {
 
   serial_printf("tcp_received called: %d", len);
   return len;
+}
+
+bool tcp_set_receiver(socket_id id, task *t) {
+  return false;
 }

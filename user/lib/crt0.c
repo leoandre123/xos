@@ -11,7 +11,7 @@ void _start(int argc, char *argv[]) {
     (*fn)();
 
   int ret = main(argc, argv);
-  sys_exit();
+  sys_exit(ret);
   (void)ret;
   for (;;)
     ;

@@ -1,14 +1,11 @@
 #include "ip.h"
+#include "io/logging.h"
 #include "memory/heap.h"
 #include "memory/memutils.h"
-#include "net/arp.h"
-#include "net/dhcp.h"
-#include "net/ethernet.h"
-#include "net/icmp.h"
 #include "net/net.h"
+#include "net/networking.h"
+#include "net/routing.h"
 #include "net/socket.h"
-#include "net/tcp.h"
-#include "net/udp.h"
 #include "net_types.h"
 #include "types.h"
 
@@ -19,7 +16,7 @@ typedef struct {
   int exists;
 } pending_ip_packet;
 
-static pending_ip_packet g_pending_packet[IP_MAX_PENDING_PACKETS];
+// ipv4_addr g_ip;
 
 static ushort
 ip_checksum(void *data, ushort len) {
@@ -36,29 +33,54 @@ ip_checksum(void *data, ushort len) {
   return ~sum;
 }
 
-static void ip_add_pending(ipv4_addr dst_addr, void *packet, ushort packet_len) {
-  for (int i = 0; i < IP_MAX_PENDING_PACKETS; i++) {
-    if (!g_pending_packet[i].exists) {
-      g_pending_packet[i].ip = dst_addr;
-      g_pending_packet[i].packet_len = packet_len;
-      g_pending_packet[i].packet = packet;
-      g_pending_packet[i].exists = 1;
-      break;
+void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_len, ip_send_opts opts) {
+  static ushort ip_id = 0;
+  nic *nic = 0;
+  route best_route = {0};
+  if (opts.nic_id) {
+    for (int i = 0; i < MAX_NICS; i++) {
+      if (g_nics[i].nic_id == opts.nic_id) {
+        nic = &g_nics[i];
+        klogf(LOG_TRACE, "SUPEROFUND, %x", nic);
+        find_best_route_for_nic(nic->nic_id, dst_addr, &best_route);
+        break;
+      }
+    }
+  } else if (opts.src_addr.value == 0) {
+    find_best_route(dst_addr, &best_route);
+    nic = &g_nics[best_route.nic_id];
+  } else {
+    for (int i = 0; i < MAX_NICS; i++) {
+      if (g_nics[i].addr.value == opts.src_addr.value) {
+        nic = &g_nics[i];
+        find_best_route_for_nic(nic->nic_id, dst_addr, &best_route);
+        break;
+      }
     }
   }
-}
 
-static ipv4_addr next_hop(ipv4_addr dst) {
-  // Always ARP directly — works on any LAN without a configured gateway
-  return dst;
-}
+  if (!nic || !best_route.nic_id) {
+    klogf(LOG_WARNING, "No NIC found: nic_id: %d, local addr: %d.%d.%d.%d",
+          opts.nic_id,
+          opts.src_addr.parts[0],
+          opts.src_addr.parts[1],
+          opts.src_addr.parts[2],
+          opts.src_addr.parts[3]);
 
-void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_len) {
-
-  static ushort ip_id = 0;
+    klogf(LOG_TRACE, "Available NICs");
+    for (int i = 0; i < MAX_NICS; i++) {
+      if (g_nics[i].nic_id) {
+        klogf(LOG_TRACE, "Nic-%d (%d)", i, g_nics[i].nic_id);
+        if (g_nics[i].nic_id == opts.nic_id) {
+          klogf(LOG_TRACE, "FOUND");
+        }
+      }
+    }
+    print_all_routes();
+    return;
+  }
 
   ipv4_header header;
-
   header.version_ihl = (4 << 4) | 5;
   header.dscp_ecn = 0;
   header.total_length = htons(sizeof(ipv4_header) + payload_len);
@@ -67,7 +89,7 @@ void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_l
   header.ttl = 64;
   header.protocol = protocol;
   header.header_checksum = 0;
-  header.src_addr = g_ip;
+  header.src_addr = nic->addr;
   header.dst_addr = dst_addr;
 
   header.header_checksum = ip_checksum(&header, sizeof(ipv4_header));
@@ -77,51 +99,14 @@ void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_l
   memcpy8(packet, (ubyte *)&header, sizeof(ipv4_header));
   memcpy8(((ubyte *)packet) + sizeof(ipv4_header), payload, payload_len);
 
-  // Broadcast IP → broadcast MAC, no ARP needed
-  if (dst_addr.value == 0xFFFFFFFF) {
-    mac_addr bcast = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
-    ethernet_send(bcast, ETHERTYPE_IPV4, packet, total);
-    kfree(packet);
-    return;
-  }
-
-  ipv4_addr arp_target = next_hop(dst_addr);
-  mac_addr mac;
-  if (arp_table_lookup(arp_target, &mac)) {
-    ethernet_send(mac, ETHERTYPE_IPV4, packet, total);
-    kfree(packet);
-  } else {
-    ip_add_pending(arp_target, packet, total);
-    arp_send_ipv4(arp_target);
-  }
-}
-
-void ip_send_pending(ipv4_addr dst_addr) {
-  for (int i = 0; i < IP_MAX_PENDING_PACKETS; i++) {
-    if (g_pending_packet[i].exists && (dst_addr.value == g_pending_packet[i].ip.value)) {
-      mac_addr mac;
-      arp_table_lookup(g_pending_packet[i].ip, &mac);
-
-      ethernet_send(mac, ETHERTYPE_IPV4, g_pending_packet[i].packet, g_pending_packet[i].packet_len);
-      kfree(g_pending_packet[i].packet);
-      g_pending_packet[i].packet = 0;
-      g_pending_packet[i].exists = 0;
-    }
-  }
+  ipv4_addr next_hop = best_route.gateway.value ? best_route.gateway : dst_addr;
+  nic->driver->send(nic, packet, total, next_hop);
+  kfree(packet);
 }
 
 void ip_receive(void *data, ushort data_len) {
   if (data_len < sizeof(ipv4_header)) {
     return;
   }
-
   socket_on_data(data, data_len);
-  // ipv4_header *header = (ipv4_header *)data;
-  // if (header->protocol == PROTOCOL_UDP) {
-  //   udp_receive(((ubyte *)data) + sizeof(ipv4_header), data_len - sizeof(ipv4_header));
-  // } else if (header->protocol == PROTOCOL_TCP) {
-  //   tcp_on_data(header->src_addr, ((ubyte *)data) + sizeof(ipv4_header), data_len - sizeof(ipv4_header));
-  // } else if (header->protocol == PROTOCOL_ICMP) {
-  //   icmp_receive(header->src_addr, ((ubyte *)data) + sizeof(ipv4_header), data_len - sizeof(ipv4_header));
-  // }
 }

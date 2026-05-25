@@ -6,6 +6,7 @@ OBJCOPY = objcopy
 CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic -m64 -mcmodel=kernel -O2 -Wall -Wextra \
          -mno-sse -mno-mmx -mno-sse2 -mno-avx \
          -fno-omit-frame-pointer \
+         -MMD -MP \
          -I. -I../shared
 LDFLAGS = -T linker.ld
 
@@ -18,6 +19,7 @@ ASMS := $(shell find . -name '*.asm')
 
 C_OBJS := $(patsubst ./%.c,$(BUILD)/%.o,$(SRCS))
 ASM_OBJS := $(patsubst ./%.asm,$(BUILD)/%.o,$(ASMS))
+DEPS := $(C_OBJS:.o=.d)
 
 
 
@@ -29,21 +31,23 @@ OBJS := $(ENTRY_OBJ) $(OTHER_ASM_OBJS) $(C_OBJS)
 
 all: $(BIN)
 
-$(ELF): $(OBJS)
+$(ELF): $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $(ELF)
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $(ELF) $(BIN)
 
-$(BUILD)/%.o: %.c
+$(BUILD)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/%.o: %.asm
+$(BUILD)/%.o: %.asm Makefile
 	@mkdir -p $(dir $@)
 	$(AS) -f elf64 $< -o $@
 
 clean:
 	rm -rf $(BUILD)
+
+-include $(DEPS)
 
 .PHONY: all clean

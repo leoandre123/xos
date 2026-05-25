@@ -2,39 +2,38 @@
 #include "keyboard.h"
 #include "syscall.h"
 #include "window/window.h"
+#include "window_event.h"
 
 #define MAX_ANSI_ARGUMENTS 16
 
 #define IS_ALPHA(c) (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
 
-static fb_info g_fb;
+static fb_info g_fb; // drawing surface — always hardware buffer 0
 static unsigned int g_cols;
 static unsigned int g_rows;
-static unsigned int g_cx; // cursor column (chars)
-static unsigned int g_cy; // cursor row (chars)
+static unsigned int g_cx;
+static unsigned int g_cy;
 
 static uint g_fg;
 static uint g_bg;
 
 static uint g_colors[] = {
-    0x001E1E2E, // Black   (dark base)
-    0x00F38BA8, // Red     (soft rose)
-    0x00A6E3A1, // Green   (mint)
-    0x00F9E2AF, // Yellow  (warm sand)
-    0x0089B4FA, // Blue    (sky)
-    0x00CBA6F7, // Magenta (lavender)
-    0x0094E2D5, // Cyan    (teal mist)
-    0x00CDD6F4, // White   (soft white)
+    0xFF1E1E2E, // Black   (dark base)
+    0xFFF38BA8, // Red     (soft rose)
+    0xFFA6E3A1, // Green   (mint)
+    0xFFF9E2AF, // Yellow  (warm sand)
+    0xFF89B4FA, // Blue    (sky)
+    0xFFCBA6F7, // Magenta (lavender)
+    0xFF94E2D5, // Cyan    (teal mist)
+    0xFFCDD6F4, // White   (soft white)
 };
 
 static void term_scroll(void) {
   unsigned int pitch_px = g_fb.pitch / 4;
   unsigned int line_h = FONT_GLYPH_HEIGHT;
-  // Shift all rows up by one line
   for (unsigned int y = line_h; y < g_fb.height; y++)
     for (unsigned int x = 0; x < g_fb.width; x++)
       g_fb.ptr[(y - line_h) * pitch_px + x] = g_fb.ptr[y * pitch_px + x];
-  // Clear the last line
   for (unsigned int y = g_fb.height - line_h; y < g_fb.height; y++)
     for (unsigned int x = 0; x < g_fb.width; x++)
       g_fb.ptr[y * pitch_px + x] = g_bg;
@@ -48,9 +47,6 @@ static void reset_style() {
 }
 
 static void parse_ansi(char *code) {
-
-  //\e[31;54m
-
   int args[MAX_ANSI_ARGUMENTS] = {0};
   int argc = 0;
 
@@ -61,9 +57,8 @@ static void parse_ansi(char *code) {
 
   while (!IS_ALPHA(*code)) {
     if (*code == ';') {
-      if (argc == MAX_ANSI_ARGUMENTS - 1) {
+      if (argc == MAX_ANSI_ARGUMENTS - 1)
         return;
-      }
       argc++;
     } else if (*code >= '0' && *code <= '9') {
       args[argc] = args[argc] * 10 + (*code - '0');
@@ -134,39 +129,50 @@ static void term_putc(char c) {
   }
 }
 
+// Copy g_fb content to hw_ptr if it differs, then present.
+static void do_present(window_handle wh, uint *hw_ptr) {
+  if (hw_ptr != g_fb.ptr) {
+    uint n = g_fb.width * g_fb.height;
+    for (uint i = 0; i < n; i++)
+      hw_ptr[i] = g_fb.ptr[i];
+  }
+  window_present(wh);
+}
+
 int main(void) {
 
-  window_handle wh = window_open(400, 300, "Terminal");
+  window_handle wh = window_open(500, 400, "Terminal");
 
   reset_style();
 
   window_get_framebuffer(wh, &g_fb);
-  // gfx_map(&g_fb);
+  gfx_clear_clip(&g_fb);
   g_cols = g_fb.width / FONT_GLYPH_WIDTH;
   g_rows = g_fb.height / FONT_GLYPH_HEIGHT;
   g_cx = 0;
   g_cy = 0;
   gfx_fill(&g_fb, g_bg);
+  term_putc('t');
 
-  // shell->terminal: terminal reads rendered text, shell writes output
+  // Prime both hardware buffers so neither starts black.
+  do_present(wh, g_fb.ptr);
+  do_present(wh, g_fb.ptr);
+
+  // shell->terminal pipe
   ulong p1 = sys_pipe();
   int shell_out_r = (int)(p1 & 0xFFFFFFFF);
   int shell_out_w = (int)(p1 >> 32);
 
-  // terminal->shell: terminal writes keyboard chars, shell reads input
+  // terminal->shell pipe
   ulong p2 = sys_pipe();
   int shell_in_r = (int)(p2 & 0xFFFFFFFF);
   int shell_in_w = (int)(p2 >> 32);
 
-  // Spawn shell with its stdin=shell_in_r, stdout=shell_out_w
   sys_exec_fds("/sys/programs/shell.elf", shell_in_r, shell_out_w);
-
-  // Main loop: render shell output, forward keyboard input
 
   window_event ev;
   while (1) {
     if (window_poll_event(wh, &ev)) {
-
       switch (ev.type) {
       case WET_KEY_DOWN: {
         if (ev.key_event.character)
@@ -176,7 +182,9 @@ int main(void) {
       case WET_MOUSE:
       case WET_RESIZE:
       case WET_MOVE:
-      case WET_CLOSE:
+      case WET_CLOSE: break;
+      case WET_PAINT:
+        do_present(wh, (uint *)ev.paint_event.paint_handle);
         break;
       }
     }
@@ -188,8 +196,7 @@ int main(void) {
       n = sys_read_fd(shell_out_r, buf, (ulong)n);
       for (int i = 0; i < n; i++)
         term_putc(buf[i]);
-
-      window_present(wh);
+      do_present(wh, g_fb.ptr);
     }
 
     sys_yield();

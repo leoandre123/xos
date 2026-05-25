@@ -1,12 +1,7 @@
 #pragma once
-
+#include "net/networking.h"
 #include "net_types.h"
 #include "types.h"
 
-typedef struct {
-  void (*init)(ulong mmio_phys);
-  void (*poll)();
-  void (*get_mac)(mac_addr *mac_out);
-  void (*send)(void *data, ushort len);
-
-} ed_ops;
+void ethernet_driver_send(nic *nic, void *data, ushort len, ipv4_addr gateway);
+void ethernet_driver_flush_pending(ipv4_addr resolved);

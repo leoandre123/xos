@@ -1,5 +1,6 @@
 #pragma once
 #include "net/net.h"
+#include "net_types.h"
 #include "types.h"
 
 #define IP_MAX_PACKET_SIZE     1500
@@ -23,6 +24,13 @@ typedef struct {
   ipv4_addr dst_addr;
 } __attribute__((__packed__)) ipv4_header;
 
+typedef struct {
+  ipv4_addr src_addr;
+  int nic_id;
+} ip_send_opts;
+
+// extern ipv4_addr g_ip;
+
 void ip_receive(void *data, ushort data_len);
-void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_len);
-void ip_send_pending(ipv4_addr dst_addr);
+void ip_send(ipv4_addr dst_addr, ubyte protocol, void *payload, ushort payload_len, ip_send_opts opts);
+// void ip_send_pending(ipv4_addr dst_addr);

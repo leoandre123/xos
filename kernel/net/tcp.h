@@ -94,6 +94,11 @@ tcp_error tcp_active(socket_id id, ipv4_addr remote_addr, ushort remote_port, us
 tcp_error tcp_passive(socket_id id, ushort port);
 bool tcp_accept(socket_id new_id, socket_id id);
 
+int tcp_socket(socket_id id);
+int tcp_bind(socket_id, socket_addr *addr);
+int tcp_listen(socket_id id);
+int tcp_connect(socket_id id, socket_addr *remote);
+
 // void tcp_init_connection(socket_id id);
 int tcp_terminate_connection(uint conn_id);
 int tcp_send(uint conn_id, void *data, ushort data_len);
@@ -104,3 +109,5 @@ int tcp_receive(uint conn_id, void *data, ushort data_len);
  **************/
 void tcp_on_data(ipv4_addr src_addr, void *data, ushort data_len);
 void tcp_send_buffered_data();
+
+bool tcp_set_receiver(socket_id id, task *t);

@@ -7,6 +7,6 @@
 #define USER_DATA_SEL   0x23
 #define TSS_SEL         0x30
 
-__attribute__((noreturn)) void jump_to_userspace(ulong entry, ulong user_rsp);
+__attribute__((noreturn)) void jump_to_userspace(ulong entry, ulong user_rsp, ulong argc, ulong argv);
 void gdt_init(void);
 void gdt_set_kernel_stack(ulong rsp0);

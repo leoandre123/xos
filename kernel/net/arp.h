@@ -1,5 +1,5 @@
 #pragma once
-#include "net/net.h"
+#include "net/networking.h"
 #include "net_types.h"
 #include "types.h"
 
@@ -25,8 +25,8 @@ typedef struct {
   mac_addr mac;
 } arp_entry;
 
-void arp_receive(ubyte *data, ushort len);
-void arp_send_ipv4(ipv4_addr addr);
+void arp_receive(ubyte *data, ushort len, nic *nic);
+void arp_send_ipv4(ipv4_addr addr, nic *nic);
 
 void arp_table_add(ipv4_addr ip, mac_addr mac);
 int arp_table_lookup(ipv4_addr ip, mac_addr *mac_out);

@@ -18,24 +18,44 @@ static inline ulong syscall(ulong num, ulong a1, ulong a2, ulong a3) {
   return ret;
 }
 
+static inline ulong syscall5(ulong num, ulong a1, ulong a2, ulong a3, ulong a4,
+                             ulong a5) {
+  ulong ret;
+  register ulong r8 __asm__("r8") = a4;
+  register ulong r9 __asm__("r9") = a5;
+  __asm__ volatile("syscall"
+                   : "=a"(ret)
+                   : "0"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r8), "r"(r9)
+                   : "rcx", "r11", "r10", "memory", "cc");
+  return ret;
+}
+
 static inline void sys_write(const char *s) {
   syscall(SYS_WRITE, (ulong)s, 0, 0);
 }
 static inline void sys_write_hex(ulong value) {
   syscall(SYS_WRITE_HEX, value, 0, 0);
 }
-static inline void sys_exit(void) { syscall(SYS_EXIT, 0, 0, 0); }
+static inline void sys_exit(int exit_code) {
+  syscall(SYS_EXIT, (ulong)exit_code, 0, 0);
+}
 static inline void sys_print(const char *s) {
   syscall(SYS_WRITE_CONSOLE, (ulong)s, 0, 0);
 }
 static inline int sys_exec(const char *path) {
-  return (int)syscall(SYS_EXEC, (ulong)path, (ulong)-1, (ulong)-1);
+  return (int)syscall5(SYS_EXEC, (ulong)path, (ulong)-1, (ulong)-1, 0, 0);
 }
 static inline int sys_exec_fds(const char *path, int stdin_fd, int stdout_fd) {
-  return (int)syscall(SYS_EXEC, (ulong)path, (ulong)stdin_fd, (ulong)stdout_fd);
+  return (int)syscall5(SYS_EXEC, (ulong)path, (ulong)stdin_fd, (ulong)stdout_fd,
+                       0, 0);
+}
+static inline int sys_exec_argv(const char *path, int stdin_fd, int stdout_fd,
+                                int argc, const char **argv) {
+  return (int)syscall5(SYS_EXEC, (ulong)path, (ulong)stdin_fd, (ulong)stdout_fd,
+                       (ulong)argc, (ulong)argv);
 }
 static inline void sys_wait(int pid) { syscall(SYS_WAIT, (ulong)pid, 0, 0); }
-static inline uint sys_wait_any() { syscall(SYS_WAIT, 0, 0, 0); }
+static inline uint sys_wait_any() { return (uint)syscall(SYS_WAIT, 0, 0, 0); }
 
 // Returns: high 32 bits = ascii char, low 32 bits = keycode
 static inline KeyEvent sys_read_key(void) {

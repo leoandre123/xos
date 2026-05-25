@@ -214,7 +214,7 @@ void pagefault_handler2(interrupt_frame *frame) {
 
   task *curr = scheduler_current();
 
-  if (curr) {
+  if (curr && curr->owner) {
     console_writef(curr->owner->name);
   }
 

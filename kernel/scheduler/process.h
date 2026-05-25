@@ -23,6 +23,7 @@ typedef struct process {
   exit_code exit_code;
 
   struct task *main_task;
+  struct task *waiting_task;
   // double linked list
   struct process *next;
   struct process *prev;

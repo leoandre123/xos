@@ -45,9 +45,15 @@ void dns_resolve(const char *host) {
   memset16((ushort *)(((ubyte *)payload) + offset), htons(1), 1);
   offset += 2;
 
-  socket_handle handle = socket_udp(g_dns_server_addr, 53, 1024);
-  socket_send(handle, payload, total_size);
-  socket_close(handle);
+  socket_handle sh = socket(SOCKET_UDP);
+  socket_addr rem;
+  rem.protocol = SOCKET_UDP;
+  rem.udp_addr.port = 53;
+  rem.udp_addr.addr = g_dns_server_addr;
+
+  socket_connect(sh, &rem);
+  socket_send(sh, payload, total_size);
+  socket_close(sh);
   kfree(payload);
 }
 void dns_set_server_ip(ipv4_addr ip) {

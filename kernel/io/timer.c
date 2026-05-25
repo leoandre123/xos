@@ -3,6 +3,7 @@
 #include "io/e1000.h"
 #include "io/io.h"
 #include "io/xhci.h"
+#include "net/networking.h"
 #include "scheduler/scheduler.h"
 #include "types.h"
 #define PIT_COMMAND        0x43
@@ -12,10 +13,16 @@
 int g_timer_ticks = 0;
 uint g_timer_frequency = 0;
 
-void timer_handler() {
+static void timer_handler() {
   g_timer_ticks++;
-  if (g_timer_ticks % 50 == 0)
-    e1000_poll();
+  sleep_queue_wake(g_timer_ticks);
+  if (g_timer_ticks % 50 == 0) {
+    for (int i = 0; i < MAX_NICS; i++) {
+      if (g_nics[i].nic_id) {
+        g_nics[i].driver->poll(&g_nics[i]);
+      }
+    }
+  }
   if (g_timer_ticks % 8 == 0)
     xhci_poll();
   if (g_timer_ticks % 10 == 0 && g_scheduler_running)

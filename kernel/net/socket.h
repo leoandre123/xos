@@ -1,6 +1,7 @@
 #pragma once
 #include "net/ip.h"
 #include "net_types.h"
+#include "scheduler/task.h"
 #include "types.h"
 
 #define SOCKET_QUEUE_SIZE 8
@@ -8,19 +9,13 @@
 
 typedef ushort socket_id;
 
-typedef enum : ubyte {
-  SOCKET_RAW = 0,
-  SOCKET_ICMP = 1,
-  SOCKET_TCP = 6,
-  SOCKET_UDP = 17,
-} socket_protocol;
-
 typedef union {
   struct {
     socket_protocol protocol;
     socket_id id;
   };
   uint value;
+  ulong value_ulong;
 } socket_handle;
 
 typedef struct {
@@ -41,24 +36,20 @@ typedef struct {
   ipv4_addr remote_addr;
 } raw_socket;
 
-socket_handle socket_tcp_client(ipv4_addr remote_addr, ushort remote_port, ushort local_port);
-socket_handle socket_tcp_server(ushort local_port);
-socket_handle socket_udp(ipv4_addr remote_addr, ushort remote_port, ushort local_port);
-socket_handle socket_icmp();
-socket_handle socket_raw();
-
-// int socket_connect(socket_handle handle);
-// int socket_listen(socket_handle handle);
-socket_handle socket_accept(socket_handle handle);
+socket_handle socket(socket_protocol protocol);       // Create socket
+void socket_close(socket_handle handle);              // Closes socket
+int socket_bind(socket_handle h, socket_addr *local); // Bind to local interface
+int socket_bind_nic(socket_handle h, int nic_id);
+int socket_listen(socket_handle h);                       // Listens to local interface (tcp only)
+socket_handle socket_accept(socket_handle h);             // Return socket to incoming connection
+int socket_connect(socket_handle h, socket_addr *remote); // Connects to remote endpoint
 
 int socket_recv(socket_handle handle, void *buf, ushort len);
 int socket_send(socket_handle handle, void *buf, ushort len);
 
-void socket_close(socket_handle handle);
-
+/* SYSTEMS API */
 void socket_init();
-
 void socket_on_data(void *data, ushort data_len);
-
 int socket_queue_write(socket_queue *queue, void *data, ushort len);
 int socket_queue_read(socket_queue *queue, void *data, ushort max_len);
+bool socket_set_receiver(socket_handle handle, task *t);

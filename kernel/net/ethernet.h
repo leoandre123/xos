@@ -1,4 +1,5 @@
 #pragma once
+#include "net/drivers/network_driver.h"
 #include "net_types.h"
 #include "types.h"
 
@@ -12,7 +13,7 @@ typedef struct {
 } __attribute__((packed)) ethernet_frame;
 
 // Called by e1000_poll when a packet arrives
-void ethernet_receive(ubyte *data, ushort len);
+void ethernet_receive(ubyte *data, ushort len, struct nic *nic);
 
 // Send an ethernet frame — fills src MAC automatically
-void ethernet_send(mac_addr dst, ushort ethertype, void *payload, ushort payload_len);
+void ethernet_send(mac_addr dst, ushort ethertype, void *payload, ushort payload_len, net_ops *driver);

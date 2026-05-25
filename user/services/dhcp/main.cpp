@@ -1,8 +1,13 @@
-#include "memory.h"
 #include "net_types.h"
+#include "nic_info.h"
 #include "socket.h"
 #include "syscall.h"
 #include "syscalls.h"
+#include "thread.h"
+#include "threads.h"
+#include "time.h"
+#include "utils.h"
+#include <memory.h>
 #include <stdio.h>
 
 typedef struct {
@@ -20,7 +25,7 @@ typedef struct {
   ubyte client_hw_addr[16];
   ubyte overflow[192];
   uint magic_cookie;
-  ubyte options[64];
+  ubyte options[244];
 } __attribute__((__packed__)) dhcp_packet;
 
 static inline uint htonl(uint x) { return __builtin_bswap32(x); }
@@ -28,11 +33,18 @@ static inline ushort htons(ushort x) { return __builtin_bswap16(x); }
 #define ntohl htonl
 #define ntohs htons
 
-static inline void sys_net_get_mac(ubyte mac[6]) {
-  syscall(SYS_NET_GET_MAC, (ulong)mac, 0, 0);
+static inline int sys_net_nics(nic_info *infos, int count) {
+  return syscall(SYS_NET_NICS, (ulong)infos, count, 0);
 }
-static inline void sys_net_set_ip(ipv4_addr ip) {
-  syscall(SYS_NET_SET_IP, ip.value, 0, 0);
+static inline void sys_net_get_mac(int nic, ubyte mac[6]) {
+  syscall(SYS_NET_GET_MAC, nic, (ulong)mac, 0);
+}
+static inline void sys_net_set_ip(int nic, ipv4_addr ip) {
+  syscall(SYS_NET_SET_IP, nic, ip.value, 0);
+}
+static inline void sys_net_conf_nic(int nic_id, nic_config_field field,
+                                    ulong value) {
+  syscall(SYS_NET_CONF_NIC, nic_id, field, value);
 }
 
 static ubyte parse_msg_type(const dhcp_packet *pkt) {
@@ -46,18 +58,50 @@ static ubyte parse_msg_type(const dhcp_packet *pkt) {
   return 0;
 }
 
-int main() {
+static inline int receive_with_timeout(socket_handle handle, void *buf,
+                                       ushort len, ulong timeout) {
+  int max_tries = timeout / 100;
+  for (int i = 0; i < max_tries; i++) {
+    int read = socket_recv_nb(handle, buf, len);
+    if (read)
+      return read;
+    sleep(100);
+  }
+  return 0;
+}
+
+static void run(nic_info *nic) {
+  char buf[128];
   sys_write("DHCP: starting\n");
 
   ubyte mac[6] = {0};
-  sys_net_get_mac(mac);
+  sys_net_get_mac(nic->nic_id, mac);
 
   ipv4_addr broadcast = {.value = 0xFFFFFFFF};
-  socket sock = socket_udp_open(broadcast, 67, 68);
+  socket_addr remote_addr = {.protocol = SOCKET_UDP,
+                             .udp_addr = {.addr = broadcast, .port = 67}};
+  socket_addr local_addr = {.protocol = SOCKET_UDP,
+                            .udp_addr = {.addr = {0}, .port = 68}};
+
+  socket_handle sock = socket(SOCKET_UDP);
+
   if (!sock) {
     sys_write("DHCP: failed to open socket\n");
-    return 1;
+    return;
   }
+
+  socket_bind(sock, &local_addr);
+  socket_bind_nic(sock, nic->nic_id);
+  socket_connect(sock, &remote_addr);
+
+  sprintf(
+      buf, "Socket created:\nlocal: %d.%d.%d.%d:%d\nremote: %d.%d.%d.%d:%d\n",
+      local_addr.udp_addr.addr.parts[0], local_addr.udp_addr.addr.parts[1],
+      local_addr.udp_addr.addr.parts[2], local_addr.udp_addr.addr.parts[3],
+      local_addr.udp_addr.port, remote_addr.udp_addr.addr.parts[0],
+      remote_addr.udp_addr.addr.parts[1], remote_addr.udp_addr.addr.parts[2],
+      remote_addr.udp_addr.addr.parts[3], remote_addr.udp_addr.port);
+  sys_write(buf);
 
   // --- DHCPDISCOVER ---
   dhcp_packet pkt = {0};
@@ -74,16 +118,21 @@ int main() {
   pkt.options[opt++] = 1; // DISCOVER
   pkt.options[opt++] = 255;
 
-  socket_udp_send(sock, &pkt, sizeof(dhcp_packet));
+  socket_send(sock, &pkt, sizeof(dhcp_packet));
   sys_write("DHCP: sent discover\n");
 
   // --- wait for DHCPOFFER ---
   dhcp_packet offer = {0};
-  socket_udp_recv(sock, &offer, sizeof(dhcp_packet));
+
+  if (!receive_with_timeout(sock, &offer, sizeof(dhcp_packet), 5000)) {
+    sys_write("DHCP: timeout\n");
+    socket_close(sock);
+    return;
+  }
   if (parse_msg_type(&offer) != 2) {
     sys_write("DHCP: expected OFFER\n");
     socket_close(sock);
-    return 1;
+    return;
   }
   sys_write("DHCP: got offer\n");
 
@@ -117,26 +166,76 @@ int main() {
   req.options[opt++] = server_ip.parts[3];
   req.options[opt++] = 255;
 
-  socket_udp_send(sock, &req, sizeof(dhcp_packet));
+  socket_send(sock, &req, sizeof(dhcp_packet));
   sys_write("DHCP: sent request\n");
 
   // --- wait for DHCPACK ---
   dhcp_packet ack = {0};
-  socket_udp_recv(sock, &ack, sizeof(dhcp_packet));
+  if (!receive_with_timeout(sock, &ack, sizeof(dhcp_packet), 5000)) {
+    sys_write("DHCP: timeout\n");
+    socket_close(sock);
+    return;
+  }
   if (parse_msg_type(&ack) != 5) {
     sys_write("DHCP: expected ACK\n");
     socket_close(sock);
-    return 1;
+    return;
+  }
+
+  int opt_ind = 0;
+  ipv4_addr netmask;
+  ipv4_addr gateway;
+  while (opt_ind < 244) {
+    int opt_type = ack.options[opt_ind++];
+    int opt_len = ack.options[opt_ind++];
+
+    if (opt_type == 1 && opt_len >= 4) {
+      netmask.parts[0] = ack.options[opt_ind + 0];
+      netmask.parts[1] = ack.options[opt_ind + 1];
+      netmask.parts[2] = ack.options[opt_ind + 2];
+      netmask.parts[3] = ack.options[opt_ind + 3];
+    } else if (opt_type == 3 && opt_len >= 4) {
+      gateway.parts[0] = ack.options[opt_ind + 0];
+      gateway.parts[1] = ack.options[opt_ind + 1];
+      gateway.parts[2] = ack.options[opt_ind + 2];
+      gateway.parts[3] = ack.options[opt_ind + 3];
+    }
+
+    opt_ind += opt_len;
   }
 
   ipv4_addr assigned = ack.your_addr;
-  sys_net_set_ip(assigned);
+  sys_net_conf_nic(nic->nic_id, NIC_ADDRESS, (ulong)assigned.value);
+  if (netmask.value)
+    sys_net_conf_nic(nic->nic_id, NIC_NETMASK, (ulong)netmask.value);
+  if (gateway.value)
+    sys_net_conf_nic(nic->nic_id, NIC_GATEWAY, (ulong)gateway.value);
 
-  char buf[64];
-  sprintf(buf, "DHCP: assigned %d.%d.%d.%d\n", assigned.parts[0],
-          assigned.parts[1], assigned.parts[2], assigned.parts[3]);
+  sprintf(buf, "DHCP: assigned %d.%d.%d.%d\n", IPV4_SPILL(assigned));
   sys_write(buf);
 
   socket_close(sock);
+  return;
+}
+
+int main() {
+  nic_info infos[10];
+  thread_handle threads[10];
+  int count = sys_net_nics(infos, 10);
+  char buf[30];
+  sprintf(buf, "DHCP: Found %x nics\n", count);
+  sys_write(buf);
+
+  for (int i = 0; i < count; i++) {
+    sprintf(buf, "NIC-%d (%d)\n", i, infos[i].nic_id);
+    sys_write(buf);
+  }
+  for (int i = 0; i < count; i++) {
+    threads[i] = thread_spawn((void *)run, (ulong)&infos[i]);
+  }
+  for (int i = 0; i < count; i++) {
+    thread_join(threads[i]);
+  }
+  sys_write("DHCP DONE!!!!!!\n");
   return 0;
 }

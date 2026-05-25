@@ -4,22 +4,18 @@
 
 EXTERN_C_BEGIN
 
-typedef uint socket;
-typedef uint server_socket;
+typedef uint socket_handle;
 
-server_socket socket_listen(ushort port);
-socket socket_accept(server_socket socket);
-
-socket socket_connect(ipv4_addr addr, ushort port);
-
-int socket_recv(socket socket, void *buf, int len);
-int socket_send(socket socket, void *buf, int len);
-
-void socket_close(socket socket);
-
-// UDP — remote addr/port are fixed at open time
-socket socket_udp_open(ipv4_addr remote, ushort remote_port, ushort local_port);
-int socket_udp_send(socket s, const void *buf, int len);
-int socket_udp_recv(socket s, void *buf, int len);
-
+socket_handle socket(socket_protocol protocol);       // Create socket
+void socket_close(socket_handle handle);              // Closes socket
+int socket_bind(socket_handle h, socket_addr *local); // Bind to local address
+int socket_bind_nic(socket_handle h, int nic_id);
+int socket_listen(socket_handle h); // Listens to local interface (tcp only)
+socket_handle
+socket_accept(socket_handle h); // Return socket to incoming connection
+int socket_connect(socket_handle h,
+                   socket_addr *remote); // Connects to remote endpoint
+int socket_recv(socket_handle handle, void *buf, ushort len);
+int socket_send(socket_handle handle, void *buf, ushort len);
+int socket_recv_nb(socket_handle h, void *buf, ushort len);
 EXTERN_C_END

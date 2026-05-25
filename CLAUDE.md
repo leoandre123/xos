@@ -57,6 +57,13 @@ cd user/apps/<name> && make clean
 
 **Debug output:** serial output goes to the QEMU terminal (stdout). QEMU interrupt/reset log goes to `/tmp/qemu.log`. Network packets captured to `/tmp/xos.pcap`.
 
+**Crash / page fault analysis:**
+```bash
+.venv/bin/python tools/pagefault.py <rip-address>              # kernel (default)
+.venv/bin/python tools/pagefault.py <rip-address> --elf shell  # user app by name
+```
+Resolves an RIP/fault address to a function name, source location, and disassembly context using `nm` + `addr2line` + `objdump` on `kernel/build/kernel.elf` (or a user ELF). Use this whenever the kernel prints an interrupt frame with a fault address.
+
 ## Architecture Overview
 
 ### Boot sequence
