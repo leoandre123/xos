@@ -4,6 +4,7 @@
 
 bitmap *img_load(const char *path) {
   file_handle h = file_open(path);
+  if (!h || h->size == 0) return 0;
   bitmap *bm = kmalloc(h->size);
   file_read(h, bm, h->size);
   file_close(h);

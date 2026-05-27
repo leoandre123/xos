@@ -48,6 +48,10 @@ SECTIONS
     .data ALIGN(4K) : AT(ALIGN(LOADADDR(.rodata) + SIZEOF(.rodata), 4K)) {
         *(.data)
         *(.data.*)
+        . = ALIGN(8);
+        __perf_counters_start = .;
+        *(.perf_counters)
+        __perf_counters_end = .;
     }
 
     .bss ALIGN(4K) : AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 4K)) {

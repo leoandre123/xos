@@ -10,6 +10,7 @@ pipe *pipe_create(void) {
   p->write_pos = 0;
   p->count = 0;
   p->ref_count = 1;
+  p->listener = 0;
   return p;
 }
 
@@ -45,4 +46,11 @@ uint pipe_read(pipe *p, ubyte *data, uint max_len) {
     p->count--;
   }
   return i;
+}
+
+bool pipe_add_listener(pipe *p, task *t) {
+  if (p->listener)
+    return false;
+  p->listener = t;
+  return true;
 }

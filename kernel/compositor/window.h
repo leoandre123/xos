@@ -1,4 +1,5 @@
 #pragma once
+#include "scheduler/task.h"
 #include "types.h"
 #include "window_event.h"
 
@@ -14,6 +15,8 @@ typedef struct {
   ulong comp_vaddr;   // framebuffer in compositor's address space
   ushort width, height;
   bool dirty;
+
+  task *event_listener;
 
   // Small event queue: compositor posts here, client drains via SYS_WINDOW_POLL
   window_event events[WINDOW_EVENT_QUEUE];

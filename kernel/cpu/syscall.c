@@ -21,6 +21,8 @@
 #include "net/socket.h"
 #include "net_types.h"
 #include "nic_info.h"
+#include "panic.h"
+#include "perf/perf.h"
 #include "process_info.h"
 #include "route_info.h"
 #include "scheduler/process.h"
@@ -109,28 +111,37 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   (void)arg2;
   (void)arg3;
 
+  task *_ct = scheduler_current();
+  PERF_MODE_SYSCALL_SCOPE(_ct);
+
   // serial_write("SYSCALL: ");
   // serial_write_hex8(num);
   // serial_write_char('\n');
 
   switch (num) {
-  case SYS_WRITE:
+  case SYS_WRITE: {
+    PERF_SCOPE("SYS_WRITE");
     serial_write((const char *)arg1);
     return 0;
+  }
 
-  case SYS_WRITE_HEX:
+  case SYS_WRITE_HEX: {
+    PERF_SCOPE("SYS_WRITE_HEX");
     serial_write_hex(arg1);
     return 0;
-
+  }
   case SYS_EXIT:
     process_exit(arg1);
     return 0;
 
-  case SYS_WRITE_CONSOLE:
+  case SYS_WRITE_CONSOLE: {
+    PERF_SCOPE("SYS_WRITE_CONSOLE");
     console_write((const char *)arg1);
     return 0;
+  }
 
   case SYS_READ_KEY: {
+    PERF_SCOPE("SYS_READ_KEY");
     KeyEvent ev = keyboard_read();
     if (ev.code != KEY_NONE)
       return ((ulong)(ubyte)ev.character << 32) | (ulong)(uint)ev.code;
@@ -146,14 +157,17 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_EXEC: {
+    PERF_SCOPE("SYS_EXEC");
     return process_exec((const char *)arg1, (int)arg2, (int)arg3, (int)arg4, (const char **)arg5);
   }
 
   case SYS_WAIT: {
+    PERF_SCOPE("SYS_WAIT");
     return process_wait((pid)arg1);
   }
 
   case SYS_PIPE: {
+    PERF_SCOPE("SYS_PIPE");
     pipe *p = pipe_create();
     if (!p)
       return (ulong)-1;
@@ -166,18 +180,30 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return ((ulong)write_fd << 32) | (ulong)read_fd;
   }
 
+  // TODO: Still blocking
   case SYS_READ_FD: {
+    PERF_SCOPE("SYS_READ_FD");
     task *t = scheduler_current();
     handle_entry *h = handle_get(t, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_READ)
       return (ulong)-1;
     pipe *p = (pipe *)h->ptr;
-    while (pipe_available(p) == 0)
-      __asm__ volatile("sti; hlt; cli");
+
+    ulong read = (ulong)pipe_read(p, (ubyte *)arg2, (uint)arg3);
+
+    if (read)
+      return read;
+
+    if (!pipe_add_listener(p, t)) {
+      return 0;
+    }
+    task_set_blocked(t);
+    schedule();
     return (ulong)pipe_read(p, (ubyte *)arg2, (uint)arg3);
   }
 
   case SYS_WRITE_FD: {
+    PERF_SCOPE("SYS_WRITE_FD");
     task *t = scheduler_current();
     handle_entry *h = handle_get(t, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_WRITE)
@@ -188,6 +214,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_MAP_FB: {
+    PERF_SCOPE("SYS_MAP_FB");
     task *t = scheduler_current();
     ulong fb_size = (ulong)g_fb_height * g_fb_pitch;
     vmm_map_bytes(t->owner->address_space, USER_FB_VADDR, g_fb_phys, fb_size,
@@ -201,6 +228,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_PIPE_AVAIL: {
+    PERF_SCOPE("SYS_PIPE_AVAIL");
     task *t = scheduler_current();
     handle_entry *h = handle_get(t, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_READ)
@@ -209,6 +237,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_READ_KEY_NB: {
+    PERF_SCOPE("SYS_READ_KEY_NB");
     KeyEvent ev = keyboard_read();
     if (ev.code == KEY_NONE)
       return 0;
@@ -216,6 +245,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_READ_MOUSE: {
+    PERF_SCOPE("SYS_READ_MOUSE");
     mouse_state ms = mouse_read_state();
     if (!ms.pending)
       return 0;
@@ -225,6 +255,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_ALLOC: {
+    PERF_SCOPE("SYS_ALLOC");
     task *t = scheduler_current();
     ulong size = arg1;
     if (size == 0)
@@ -241,6 +272,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   case SYS_FREE: {
+    PERF_SCOPE("SYS_FREE");
     ulong vaddr = arg1;
     ulong size = arg2;
     if (!vaddr || !size)
@@ -251,26 +283,24 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return 0;
   }
 
-  case SYS_YIELD:
+  case SYS_YIELD: {
+    PERF_SCOPE("SYS_YIELD");
     schedule();
     return 0;
-
-  case SYS_UNIX_TIME:
-    return time_unix();
-
-  case SYS_UNIX_TIME_MILLIS:
-    return time_unix_millis();
-
-  case SYS_VBLANK_WAIT: {
-    ulong now = time_unix_millis();
-    ulong next = ((now / 16) + 1) * 16; // next 16ms boundary (~60 FPS)
-    __asm__ volatile("sti");
-    while (time_unix_millis() < next)
-      schedule();
-    __asm__ volatile("cli");
-    return 0;
   }
+
+  case SYS_UNIX_TIME: {
+    PERF_SCOPE("SYS_UNIX_TIME");
+    return time_unix();
+  }
+
+  case SYS_UNIX_TIME_MILLIS: {
+    PERF_SCOPE("SYS_UNIX_TIME_MILLIS");
+    return time_unix_millis();
+  }
+
   case SYS_SLEEP: {
+    PERF_SCOPE("SYS_SLEEP");
     ulong now = timer_get_ticks();
     ulong wakeup_tick = now + timer_ms_to_ticks(arg1);
     task *t = scheduler_current();
@@ -281,56 +311,92 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return 0;
   }
 
-  case SYS_PROCESS_EXEC:
+  case SYS_PROCESS_EXEC: {
+    PERF_SCOPE("SYS_PROCESS_EXEC");
     return process_exec((const char *)arg1, (int)arg2, (int)arg3, (int)arg4, (const char **)arg5);
-
-  case SYS_PROCESS_LIST:
+  }
+  case SYS_PROCESS_LIST: {
+    PERF_SCOPE("SYS_PROCESS_LISY");
     return process_list((process_info *)arg1, arg2);
-
+  }
 #pragma region threads
 
-  case SYS_THREAD:
+  case SYS_THREAD: {
+    PERF_SCOPE("SYS_THREAD");
     return process_spawn_thread((void(*))arg1, arg2);
-  case SYS_THREAD_JOIN:
+  }
+  case SYS_THREAD_JOIN: {
+    PERF_SCOPE("SYS_THREAD_JOIN");
     return process_join_thread((thread_handle)arg1);
-  case SYS_THREAD_KILL:
+  }
+  case SYS_THREAD_KILL: {
+    PERF_SCOPE("SYS_THREAD_KILL");
     process_kill_thread((thread_handle)arg1);
     return 0;
-  case SYS_THREAD_EXIT:
+  }
+
+  case SYS_THREAD_EXIT: {
     process_exit_thread(arg1);
+  }
 #pragma endregion threads
 
-  case SYS_FILE_OPEN:
+  case SYS_FILE_OPEN: {
+    PERF_SCOPE("SYS_FILE_OPEN");
     return (ulong)file_open((const char *)arg1);
-  case SYS_FILE_CLOSE:
+  }
+  case SYS_FILE_CLOSE: {
+    PERF_SCOPE("SYS_FILE_CLOSE");
     file_close((file_handle)arg1);
     return 0;
-  case SYS_FILE_READDIR:
+  }
+  case SYS_FILE_READDIR: {
+    PERF_SCOPE("SYS_FILE_READDIR");
     return file_readdir((const char *)arg1, (file_dirent *)arg2, arg3);
-  case SYS_FILE_READ:
+  }
+  case SYS_FILE_READ: {
+    PERF_SCOPE("SYS_FILE_READ");
     return file_read((file_handle)arg1, (void *)arg2, arg3);
-
-  case SYS_FILE_SIZE:
+  }
+  case SYS_FILE_SIZE: {
+    PERF_SCOPE("SYS_FILE_SIZE");
     return ((file_handle)arg1)->size;
+  }
 
-  case SYS_SOCKET:
+  case SYS_SOCKET: {
+    PERF_SCOPE("SYS_SOCKET");
     return socket(arg1).value_ulong;
-  case SYS_SOCKET_CLOSE:
+  }
+  case SYS_SOCKET_CLOSE: {
+    PERF_SCOPE("SYS_SOCKET_CLOSE");
     socket_close((socket_handle)(uint)arg1);
     return 0;
-  case SYS_SOCKET_BIND:
+  }
+  case SYS_SOCKET_BIND: {
+    PERF_SCOPE("SYS_SOCKET_BIND");
     return (ulong)socket_bind((socket_handle)(uint)arg1, (socket_addr *)arg2);
-  case SYS_SOCKET_BIND_NIC:
+  }
+  case SYS_SOCKET_BIND_NIC: {
+    PERF_SCOPE("SYS_SOCKET_BIND_NIC");
     return (ulong)socket_bind_nic((socket_handle)(uint)arg1, (int)arg2);
-  case SYS_SOCKET_LISTEN:
+  }
+  case SYS_SOCKET_LISTEN: {
+    PERF_SCOPE("SYS_SOCKET_LISTEN");
     return socket_listen((socket_handle)arg1);
-  case SYS_SOCKET_ACCEPT:
+  }
+  case SYS_SOCKET_ACCEPT: {
+    PERF_SCOPE("SYS_SOCKET_ACCEPT");
     return socket_accept((socket_handle)arg1).value_ulong;
-  case SYS_SOCKET_CONNECT:
+  }
+  case SYS_SOCKET_CONNECT: {
+    PERF_SCOPE("SYS_SOCKET_CONNECT");
     return socket_connect((socket_handle)arg1, (socket_addr *)arg2);
-  case SYS_SOCKET_SEND:
+  }
+  case SYS_SOCKET_SEND: {
+    PERF_SCOPE("SYS_SOCKET_SEND");
     return socket_send((socket_handle)arg1, (void *)arg2, arg3);
+  }
   case SYS_SOCKET_RECEIVE: {
+    PERF_SCOPE("SYS_SOCKET_RECEIVE");
     int read_len = socket_recv((socket_handle)arg1, (void *)arg2, arg3);
     if (read_len)
       return read_len;
@@ -342,19 +408,25 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     schedule();
     return socket_recv((socket_handle)arg1, (void *)arg2, arg3);
   }
-  case SYS_SOCKET_RECEIVE_NB:
+  case SYS_SOCKET_RECEIVE_NB: {
+    PERF_SCOPE("SYS_SOCKET_RECEIVE_NB");
     return socket_recv((socket_handle)arg1, (void *)arg2, arg3);
-
-  case SYS_NET_GET_MAC:
+  }
+  case SYS_NET_GET_MAC: {
+    PERF_SCOPE("SYS_NET_GET_MAC");
     if (arg1 < MAX_NICS)
       g_nics[arg1].driver->get_mac((mac_addr *)arg2);
     return 0;
-  case SYS_NET_SET_IP:
+  }
+
+  case SYS_NET_SET_IP: {
     if (arg1 < MAX_NICS)
       g_nics[arg1].addr = (ipv4_addr)(uint)arg2;
     return 0;
+  }
 
   case SYS_NET_NICS: {
+    PERF_SCOPE("SYS_NET_NICS");
     int c = 0;
     for (int i = 0; i < MAX_NICS; i++) {
       if (g_nics[i].nic_id) {
@@ -372,24 +444,30 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return c;
   }
   case SYS_NET_ROUTES: {
+    PERF_SCOPE("SYS_NET_ROUTES");
     return get_routes((route_info *)arg1, arg2);
   }
 
-  case SYS_NET_CONF_NIC:
+  case SYS_NET_CONF_NIC: {
+    PERF_SCOPE("SYS_NET_CONF_NIC");
     configure_nic(arg1, arg2, arg3);
     return 0;
+  }
 
   case SYS_WM_REGISTER: {
+    PERF_SCOPE("SYS_WM_REGISTER");
     task *t = scheduler_current();
     return (ulong)wm_register(t);
   }
 
   case SYS_WM_POLL: {
     // arg1 = pointer to wm in user space
+    PERF_SCOPE("SYS_WM_POLL");
     return (ulong)wm_poll((wm_event *)arg1);
   }
 
   case SYS_WINDOW_CREATE: {
+    PERF_SCOPE("SYS_WINDOW_CREATE");
     // arg1=window_create_options*; returns window_handle or 0
     typedef struct {
       ushort width;
@@ -406,28 +484,49 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return handle;
   }
 
-  case SYS_WINDOW_PRESENT:
+  case SYS_WINDOW_PRESENT: {
+    PERF_SCOPE("SYS_WINDOW_PRESENT");
     wm_present_window((window_handle)arg1);
     return 0;
+  }
 
-  case SYS_WINDOW_POST_EVENT:
+  case SYS_WINDOW_POST_EVENT: {
+    PERF_SCOPE("SYS_WINDOW_POST_EVENT");
     return (ulong)wm_post_event((window_handle)arg1, (window_event *)arg2);
+  }
+  case SYS_WINDOW_POLL: {
+    PERF_SCOPE("SYS_WINDOW_POLL");
+    int ev = wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
 
-  case SYS_WINDOW_POLL:
+    if (ev)
+      return ev;
+    task *t = scheduler_current();
+    if (!wm_window_poll_event_set_listener((window_handle)arg1, t)) {
+      return 0;
+    }
+    task_set_blocked(t);
+    schedule();
     return (ulong)wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
+  }
+
+    // case SYS_WINDOW_POLL:
+    //   return (ulong)wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
 
   case SYS_WINDOW_FRAMEBUFFER: {
+    PERF_SCOPE("SYS_WINDOW_FRAMEBUFFER");
     wm_get_framebuffer(arg1, (fb_info *)arg2);
     return 0;
   }
 
   case SYS_STATS_MEMORY: {
+    PERF_SCOPE("SYS_STATS_MEMORY");
     mem_info *info = (mem_info *)arg1;
     pmm_get_stats(info);
     return 0;
   }
 
   case SYS_STATS_CPU: {
+    PERF_SCOPE("SYS_STATS_CPU");
     cpu_info *info = (cpu_info *)arg1;
     uint eax, ebx, ecx, edx;
 
@@ -458,6 +557,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   }
 
   default:
+    panic("Invalid syscall number");
     return (ulong)-1;
   }
 }

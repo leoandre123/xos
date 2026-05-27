@@ -3,14 +3,24 @@ LD = ld
 AS = nasm
 OBJCOPY = objcopy
 
+PERF ?= 0
+
 CFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic -m64 -mcmodel=kernel -O2 -Wall -Wextra \
          -mno-sse -mno-mmx -mno-sse2 -mno-avx \
          -fno-omit-frame-pointer \
          -MMD -MP \
          -I. -I../shared
+ifeq ($(PERF),1)
+CFLAGS += -DKERNEL_PERF
+endif
 LDFLAGS = -T linker.ld
 
 BUILD = build
+
+# Sentinel file: rebuilt only when PERF changes, which then forces a full C rebuild.
+# Must be after BUILD is defined so $(BUILD) expands correctly.
+PERF_STAMP := $(BUILD)/.perf_stamp
+$(shell mkdir -p $(BUILD) && echo 'PERF=$(PERF)' | cmp -s - $(PERF_STAMP) 2>/dev/null || echo 'PERF=$(PERF)' > $(PERF_STAMP))
 ELF = $(BUILD)/kernel.elf
 BIN = $(BUILD)/kernel.bin
 
@@ -37,7 +47,7 @@ $(ELF): $(OBJS) linker.ld
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $(ELF) $(BIN)
 
-$(BUILD)/%.o: %.c Makefile
+$(BUILD)/%.o: %.c Makefile $(PERF_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 

@@ -2,7 +2,9 @@
 #include "memory/memutils.h"
 #include "memory/pmm.h"
 #include "memory/vmm.h"
+#include "perf/perf.h"
 #include "scheduler/process.h"
+#include "scheduler/scheduler.h"
 #include "scheduler/task.h"
 #include "types.h"
 #include "window.h"
@@ -131,10 +133,16 @@ int wm_post_event(window_handle handle, window_event *ev) {
     return -1;
   w->events[w->ev_head] = *ev;
   w->ev_head = next;
+
+  if (w->event_listener) {
+    task_set_ready(w->event_listener);
+    w->event_listener = 0;
+  }
   return 0;
 }
 
 int wm_window_poll_event(window_handle handle, window_event *ev) {
+  PERF_SCOPE("wm_window_poll_event");
   if (handle >= WINDOW_MAX_COUNT || !g_windows[handle].exists)
     return 0;
   kernel_window *w = &g_windows[handle];
@@ -143,6 +151,18 @@ int wm_window_poll_event(window_handle handle, window_event *ev) {
   *ev = w->events[w->ev_tail];
   w->ev_tail = (w->ev_tail + 1) % WINDOW_EVENT_QUEUE;
   return 1;
+}
+bool wm_window_poll_event_set_listener(window_handle handle, task *t) {
+  if (handle >= WINDOW_MAX_COUNT || !g_windows[handle].exists)
+    return false;
+  kernel_window *w = &g_windows[handle];
+
+  if (w->event_listener)
+    return false;
+
+  w->event_listener = t;
+
+  return true;
 }
 
 void wm_get_framebuffer(window_handle handle, fb_info *fb) {

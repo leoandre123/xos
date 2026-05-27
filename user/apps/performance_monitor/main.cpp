@@ -162,25 +162,23 @@ int main(void) {
   // s_info_count = process_list(s_infos, ROW_COUNT);
   update_proc_list();
   redraw();
-  while (1) {
-    window_event ev;
-    while (window_poll_event(w, &ev)) {
-      if (ev.type == WET_CREATE) {
-        ui_init(ev.create_event.width, ev.create_event.height,
-                ev.create_event.pitch);
-      } else if (ev.type == WET_PAINT) {
-        if (!ev.paint_event.paint_handle) {
-          sys_write("ERROR FB EMPTY");
-          for (;;)
-            sys_yield();
-        }
-        ui_render(ev.paint_event.paint_handle);
-        window_end_paint(w);
-      } else {
-        ui_update(ev);
+
+  window_event ev;
+  while (window_poll_event(w, &ev)) {
+    if (ev.type == WET_CREATE) {
+      ui_init(ev.create_event.width, ev.create_event.height,
+              ev.create_event.pitch);
+    } else if (ev.type == WET_PAINT) {
+      if (!ev.paint_event.paint_handle) {
+        sys_write("ERROR FB EMPTY");
+        for (;;)
+          sys_yield();
       }
+      ui_render(ev.paint_event.paint_handle);
+      window_end_paint(w);
+    } else {
+      ui_update(ev);
     }
-    sys_yield();
   }
 
   return 0;

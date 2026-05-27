@@ -1,4 +1,5 @@
 #pragma once
+#include "scheduler/task.h"
 #include "types.h"
 
 #define PIPE_BUF_SIZE 4096
@@ -9,6 +10,7 @@ typedef struct pipe {
   uint write_pos;
   uint count;
   int ref_count;
+  task *listener;
 } pipe;
 
 pipe *pipe_create(void);
@@ -18,3 +20,4 @@ void pipe_release(pipe *p);
 void pipe_write(pipe *p, const ubyte *data, uint len);
 uint pipe_read(pipe *p, ubyte *data, uint max_len);
 uint pipe_available(pipe *p);
+bool pipe_add_listener(pipe *p, task *t);

@@ -96,8 +96,6 @@ static inline ulong sys_unix_time_millis(void) {
   return syscall(SYS_UNIX_TIME_MILLIS, 0, 0, 0);
 }
 
-static inline void sys_vblank_wait(void) { syscall(SYS_VBLANK_WAIT, 0, 0, 0); }
-
 static inline void sys_mem_info(mem_info *info) {
   syscall(SYS_STATS_MEMORY, (ulong)info, 0, 0);
 }

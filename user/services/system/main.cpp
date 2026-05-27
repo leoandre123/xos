@@ -2,6 +2,7 @@
 #include "fs/file.h"
 #include "string.h"
 #include "syscall.h"
+#include "time.h"
 #include "utils.h"
 #include <stdio.h>
 
@@ -61,6 +62,6 @@ int main() {
   sys_exec("/sys/programs/dhcp.elf");
 
   while (true) {
-    sys_yield();
+    sleep(600000);
   }
 }

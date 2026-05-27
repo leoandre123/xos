@@ -45,7 +45,17 @@ void emit_formatted_str(void (*emit)(char, void *), void *ctx, const char *fmt, 
     switch (*fmt++) {
     case 's': {
       const char *s = va_arg(args, const char *);
-      emit_str(emit, ctx, s ? s : "(null)");
+      if (!s)
+        s = "(null)";
+      if (width > 0) {
+        int len = 0;
+        const char *p = s;
+        while (*p++)
+          len++;
+        while (len++ < width)
+          emit(pad, ctx);
+      }
+      emit_str(emit, ctx, s);
       break;
     }
     case 'c':

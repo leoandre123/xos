@@ -96,9 +96,7 @@ int main(void) {
 
   bitmap *folder_icon = img_load("/sys/icons/folder.lbm");
 
-  while (1) {
-    while (!window_poll_event(wh, &ev))
-      sys_yield();
+  while (window_poll_event(wh, &ev)) {
 
     switch (ev.type) {
     case WET_MOUSE:

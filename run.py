@@ -3,6 +3,7 @@ import argparse
 import glob
 import os
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -64,10 +65,11 @@ def find_ovmf():
     return code[0], vars_[0]
 
 
-def build():
+def build(perf=False):
     section("Build")
 
-    run("make", cwd=KERNEL,     label="kernel build")
+    make_args = ["PERF=1"] if perf else []
+    run("make", *make_args, cwd=KERNEL, label="kernel build")
     ok("Kernel")
 
     run("make", cwd=BOOTLOADER, label="bootloader build")
@@ -200,7 +202,7 @@ def populate_data(image, init_mode):
     ok("Data partition")
 
 
-def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug, ps2):
+def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug, ps2, use_sudo=False):
     section("QEMU")
 
     drives   = ["-drive", f"if=pflash,format=raw,readonly=on,file={code_fd}",
@@ -226,13 +228,19 @@ def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug, ps2):
     console.print(Panel(info, title="[bold green]Launching QEMU[/bold green]", border_style="green"))
     console.print()
 
+    net = ["-netdev", "user,id=net0", "-device", "e1000,netdev=net0"]
+    if not use_sudo:
+        net += ["-object", "filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap"]
+
     cmd = ["qemu-system-x86_64", "-m", "256M", "-cpu", "max", "-smp", "4", *drives,
-           "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
-           "-device", "qemu-xhci,id=xhci", *usb_devs,
-           "-object", "filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap",
-           "-serial", "stdio", "-d", "int,cpu_reset", "-D", "/tmp/qemu.log"]
+           *net, "-device", "qemu-xhci,id=xhci", *usb_devs,
+           "-serial", "stdio"]
+    if not use_sudo:
+        cmd += ["-d", "int,cpu_reset", "-D", "/tmp/qemu.log"]
     if debug:
         cmd += ["-s", "-S"]
+    if use_sudo:
+        cmd = ["sudo"] + cmd
 
     subprocess.run(cmd, check=True)
 
@@ -265,6 +273,57 @@ def clean():
             console.print(f"  [dim]–  {label} already clean[/dim]")
 
 
+def flash_device(image, device):
+    section("Flash to USB")
+
+    if not os.path.exists(device):
+        console.print(f"[red]ERROR: {device} does not exist[/red]")
+        sys.exit(1)
+    if not stat.S_ISBLK(os.stat(device).st_mode):
+        console.print(f"[red]ERROR: {device} is not a block device[/red]")
+        sys.exit(1)
+
+    img_size = os.path.getsize(image)
+    result = subprocess.run(["lsblk", device], capture_output=True, text=True)
+    console.print(result.stdout.rstrip())
+    console.print()
+    console.print(f"[bold yellow]WARNING:[/bold yellow] This will ERASE everything on [bold]{device}[/bold]")
+    console.print(f"  Image: {os.path.relpath(image, ROOT)}  ({img_size / 1024 / 1024:.1f} MB)")
+    confirm = input("\nType YES to continue: ")
+    if confirm.strip() != "YES":
+        console.print("Aborted.")
+        sys.exit(0)
+
+    # unmount any mounted partitions
+    result = subprocess.run(["lsblk", "-rno", "NAME,MOUNTPOINT", device],
+                            capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1]:
+            subprocess.run(["sudo", "umount", f"/dev/{parts[0]}"], capture_output=True)
+
+    console.print(f"\n  [cyan]Writing[/cyan] {os.path.relpath(image, ROOT)} → {device}\n")
+    result = subprocess.run(
+        ["sudo", "dd", f"if={image}", f"of={device}", "bs=4M", "status=progress", "conv=fsync"]
+    )
+    if result.returncode != 0:
+        console.print("[red]ERROR: dd failed[/red]")
+        sys.exit(result.returncode)
+
+    console.print()
+    ok(f"Flashed to {device}")
+    console.print("\n  Eject the drive and boot from it.")
+    console.print("  In your UEFI firmware select: EFI/BOOT/BOOTX64.EFI")
+
+
+def patch_esp(device):
+    """Update kernel.bin on the ESP partition of a physical device using mtools (no mount needed)."""
+    run("sudo", "mcopy", "-i", f"{device}@@{EFI_BYTE}", "-o",
+        os.path.join(KERNEL, "build/kernel.bin"), "::kernel.bin",
+        label="Patching kernel.bin on ESP")
+    ok(f"kernel.bin → {device} ESP")
+
+
 def main():
     parser = argparse.ArgumentParser(description="XOS build & run")
     parser.add_argument("--clean",        action="store_true", help="Remove all build artifacts and exit")
@@ -274,8 +333,11 @@ def main():
     parser.add_argument("--ata",         dest="drive_mode", action="store_const", const="ata")
     parser.add_argument("--debug", "-d", action="store_true")
     parser.add_argument("--pxe",         action="store_true")
+    parser.add_argument("--flash",       metavar="DEVICE",  help="Flash to a physical USB drive (e.g. /dev/sdb)")
+    parser.add_argument("--passthrough", metavar="DEVICE",  help="Boot QEMU from a physical USB drive, patching kernel.bin first (e.g. /dev/sdb)")
     parser.add_argument("--fast-boot",   action="store_true")
     parser.add_argument("--ps2",         action="store_true", help="Use PS/2 keyboard instead of USB HID")
+    parser.add_argument("--perf",        action="store_true", help="Enable kernel performance counters (KERNEL_PERF)")
     parser.set_defaults(init_mode="terminal", drive_mode="ata")
     args = parser.parse_args()
 
@@ -293,15 +355,27 @@ def main():
         padding=(1, 4),
     ))
 
-    build()
+    build(perf=args.perf)
     prepare_esp()
+
+    if args.pxe:
+        deploy_pxe(tftp_root)
+        return
+
+    if args.flash:
+        image = os.path.join(BUILD, "usb.img")
+        create_image(image)
+        populate_data(image, args.init_mode)
+        flash_device(image, args.flash)
+        return
 
     code_fd, vars_fd = find_ovmf()
     shutil.copy(vars_fd, os.path.join(BUILD, "OVMF_VARS.fd"))
     ovmf_vars = os.path.join(BUILD, "OVMF_VARS.fd")
 
-    if args.pxe:
-        deploy_pxe(tftp_root)
+    if args.passthrough:
+        patch_esp(args.passthrough)
+        launch_qemu(args.passthrough, "usb", code_fd, ovmf_vars, args.debug, args.ps2, use_sudo=True)
         return
 
     image = (os.path.join(BUILD, "usb.img") if args.drive_mode == "usb"

@@ -78,7 +78,8 @@ static void free_entry_icons() {
   for (int i = 0; i < MAX_ENTRIES; i++) {
     if (g_entry_icons[i]) {
       bitmap *bm = g_entry_icons[i];
-      ulong sz = (ulong)(bm->width * bm->height * sizeof(uint)) + 2 * sizeof(uint);
+      ulong sz =
+          (ulong)(bm->width * bm->height * sizeof(uint)) + 2 * sizeof(uint);
       sys_free(bm, sz);
       g_entry_icons[i] = 0;
     }
@@ -92,10 +93,13 @@ static void load_entry_icons() {
     if (g_entries[i].is_dir || !is_elf(g_entries[i].name))
       continue;
     int j = 0;
-    for (; j < plen; j++) path[j] = g_path[j];
-    if (plen > 1) path[j++] = '/';
+    for (; j < plen; j++)
+      path[j] = g_path[j];
+    if (plen > 1)
+      path[j++] = '/';
     const char *n = g_entries[i].name;
-    while (*n) path[j++] = *n++;
+    while (*n)
+      path[j++] = *n++;
     path[j] = '\0';
     g_entry_icons[i] = elf_icon_load(path);
   }
@@ -199,25 +203,22 @@ int main(void) {
   refresh_list();
   redraw();
 
-  while (1) {
-    window_event ev;
-    while (window_poll_event(w, &ev)) {
-      if (ev.type == WET_CREATE) {
-        ui_init(ev.create_event.width, ev.create_event.height,
-                ev.create_event.pitch);
-      } else if (ev.type == WET_PAINT) {
-        if (!ev.paint_event.paint_handle) {
-          sys_write("ERROR FB EMPTY");
-          for (;;)
-            sys_yield();
-        }
-        ui_render(ev.paint_event.paint_handle);
-        window_end_paint(w);
-      } else {
-        ui_update(ev);
+  window_event ev;
+  while (window_poll_event(w, &ev)) {
+    if (ev.type == WET_CREATE) {
+      ui_init(ev.create_event.width, ev.create_event.height,
+              ev.create_event.pitch);
+    } else if (ev.type == WET_PAINT) {
+      if (!ev.paint_event.paint_handle) {
+        sys_write("ERROR FB EMPTY");
+        for (;;)
+          sys_yield();
       }
+      ui_render(ev.paint_event.paint_handle);
+      window_end_paint(w);
+    } else {
+      ui_update(ev);
     }
-    sys_yield();
   }
 
   return 0;

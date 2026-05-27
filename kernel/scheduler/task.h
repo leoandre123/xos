@@ -33,4 +33,9 @@ typedef struct task {
   // Scheduler linked list
   struct task *next;
   struct task *prev;
+
+  // User/kernel time tracking (fed into perf counters)
+  ulong perf_last_tsc;
+  bool  perf_in_syscall;
+  bool  perf_in_irq;
 } task;

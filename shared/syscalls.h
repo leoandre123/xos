@@ -24,7 +24,6 @@
 /* TIME 40- */
 #define SYS_UNIX_TIME        40
 #define SYS_UNIX_TIME_MILLIS 41
-#define SYS_VBLANK_WAIT      42 // blocking wating for vsync, no args
 #define SYS_SLEEP            43 // blocks for arg1 ms
 
 /* PROCESSES 60-69 */

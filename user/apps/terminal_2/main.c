@@ -198,7 +198,5 @@ int main(void) {
         term_putc(buf[i]);
       do_present(wh, g_fb.ptr);
     }
-
-    sys_yield();
   }
 }

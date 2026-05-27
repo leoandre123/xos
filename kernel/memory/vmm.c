@@ -4,6 +4,7 @@
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "panic.h"
+#include "perf/perf.h"
 #include "types.h"
 
 #define SIZE_TO_PAGE_COUNT(size) (size + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -142,6 +143,7 @@ void vmm_destroy_address_space(address_space *space) {
   panic("vmm_destroy_address_space is not implemented!");
 }
 void vmm_switch_address_space(address_space *space) {
+  PERF_SCOPE("vmm switch address space");
   vmm_mount_address_space(space);
 }
 

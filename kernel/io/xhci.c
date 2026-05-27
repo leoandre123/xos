@@ -3,9 +3,11 @@
 #include "../memory/pmm.h"
 #include "../memory/vmm.h"
 #include "io/logging.h"
+#include "io/timer.h"
 #include "keyboard.h"
 #include "keys.h"
 #include "pci.h"
+#include "perf/perf.h"
 #include "serial.h"
 #include "types.h"
 #include <stddef.h>
@@ -377,7 +379,7 @@ static void bios_handoff(uint xecp_off) {
     ubyte id = (ubyte)(hdr & 0xff);
     ubyte nxt = (ubyte)((hdr >> 8) & 0xff);
 
-    if (id == 1) { // USB Legacy Support (USBLEGSUP)
+    if (id == 1) {                     // USB Legacy Support (USBLEGSUP)
       volatile uint *smi_ctrl = p + 1; // USBLEGCTLSTS
       klogf(LOG_TRACE, "xHCI: USBLEGSUP=%x USBLEGCTLSTS_before=%x", hdr, *smi_ctrl);
 
@@ -387,16 +389,29 @@ static void bios_handoff(uint xecp_off) {
 
       *p = hdr | (1u << 24); // set OS Owned Semaphore
       mb();
-      for (int i = 0; i < 100000000; i++) {
-        if (!(*p & (1u << 16)))
+
+      // Wait up to 2 s for BIOS to release ownership.
+      bool handed_off = false;
+      for (int i = 0; i < 200; i++) {
+        ksleep_ms(10);
+        if (!(*p & (1u << 16))) {
+          handed_off = true;
           break;
+        }
       }
-      if (*p & (1u << 16))
+      // Re-clear SMI enables in case the BIOS re-armed them during handoff.
+      *smi_ctrl = 0;
+      mb();
+
+      if (!handed_off)
         klogf(LOG_TRACE, "xHCI: BIOS handoff timeout USBLEGSUP=%x USBLEGCTLSTS=%x",
               *p, *smi_ctrl);
       else
         klogf(LOG_TRACE, "xHCI: BIOS handoff OK USBLEGSUP=%x USBLEGCTLSTS=%x",
               *p, *smi_ctrl);
+
+      // Let any in-flight SMI complete before we touch ports.
+      ksleep_ms(50);
       return;
     }
     if (nxt == 0) {
@@ -411,21 +426,27 @@ static void bios_handoff(uint xecp_off) {
 
 static bool ctrl_reset(void) {
   OP32(OP_USBCMD) &= ~CMD_RS;
-  for (int i = 0; i < 2000000; i++)
+  for (int i = 0; i < 200; i++) {
     if (OP32(OP_USBSTS) & STS_HCH)
       break;
+    ksleep_ms(1);
+  }
   if (!(OP32(OP_USBSTS) & STS_HCH)) {
     serial_write_line("xHCI: HC failed to halt");
     return false;
   }
 
   OP32(OP_USBCMD) |= CMD_HCRST;
-  for (int i = 0; i < 2000000; i++)
+  for (int i = 0; i < 200; i++) {
     if (!(OP32(OP_USBCMD) & CMD_HCRST))
       break;
-  for (int i = 0; i < 2000000; i++)
+    ksleep_ms(1);
+  }
+  for (int i = 0; i < 200; i++) {
     if (!(OP32(OP_USBSTS) & STS_CNR))
       break;
+    ksleep_ms(1);
+  }
 
   if (OP32(OP_USBCMD) & CMD_HCRST) {
     serial_write_line("xHCI: reset timeout");
@@ -527,85 +548,76 @@ static bool port_reset(int port) {
         (uint)port, ps, pls,
         (ps >> 9) & 1u, ps & 1u, (ps >> 1) & 1u, (ps >> 17) & 1u);
 
-  // Write test: momentarily clear PP and read back to verify writes reach hardware.
-  // If readback still shows PP=1, writes are being discarded (SMM still active).
-  {
-    uint wt = (ps & ~PS_RW1C) & ~PS_PP;
-    PORT32(port, 0) = wt;
-    mb();
-    uint rb = PORT32(port, 0);
-    bool writes_ok = (rb & PS_PP) == 0;
-    klogf(LOG_TRACE, "xHCI: port %u PP=0 write test: readback=%x writes_ok=%d",
-          (uint)port, rb, (int)writes_ok);
-    // Restore.
-    PORT32(port, 0) = ps & ~PS_RW1C;
-    mb();
-    if (!writes_ok) {
-      klogf(LOG_TRACE, "xHCI: port %u PORTSC writes NOT reaching hardware - check BIOS handoff",
-            (uint)port);
-      // Still try PR=1 below — might work even if PP is hardwired.
-    }
-  }
+  // Warn if PP is already low — may indicate incomplete BIOS handoff.
+  if (!(ps & PS_PP))
+    klogf(LOG_TRACE, "xHCI: port %u PP=0 at entry — BIOS handoff may be incomplete", (uint)port);
 
   if (pls == 7) {
     klogf(LOG_TRACE, "xHCI: port %u Polling at entry, waiting for hw reset to finish...",
           (uint)port);
     // Use spin-delay between checks so timing isn't tied to MMIO read speed.
     for (int i = 0; i < 50; i++) {
-      for (volatile long j = 0; j < 5000000LL; j++) ;  // ~5-10ms
+      ksleep_ms(10);
       ps = PORT32(port, 0);
       pls = (ps >> 5) & 0xf;
       if (ps & PS_PED) {
-        klogf(LOG_TRACE, "xHCI: port %u PED=1 naturally after ~%dms", (uint)port, (i+1)*8);
+        klogf(LOG_TRACE, "xHCI: port %u PED=1 naturally after ~%dms", (uint)port, (i + 1) * 8);
         return true;
       }
       if (pls != 7) {
         klogf(LOG_TRACE, "xHCI: port %u PLS changed %u->%u after ~%dms",
-              (uint)port, 7u, pls, (i+1)*8);
+              (uint)port, 7u, pls, (i + 1) * 8);
         break;
       }
     }
     ps = PORT32(port, 0);
     pls = (ps >> 5) & 0xf;
-    if (ps & PS_PED) return true;
+    if (ps & PS_PED)
+      return true;
     klogf(LOG_TRACE, "xHCI: port %u Polling wait ended PLS=%u PORTSC=%x", (uint)port, pls, ps);
 
     if (pls == 7) {
       // Still stuck. Try power-cycling.
-      uint wval = (ps & ~PS_RW1C) & ~PS_PP;
+      uint wval = (ps & ~PS_RW1C) & ~PS_PP & ~PS_PED;
       PORT32(port, 0) = wval;
       mb();
       bool pp_worked = false;
-      for (volatile long j = 0; j < 5000000LL; j++) ;  // ~5ms for PP to take effect
+      ksleep_ms(5);
       uint rb = PORT32(port, 0);
       klogf(LOG_TRACE, "xHCI: port %u PP=0 cycle: readback=%x CCS=%u",
             (uint)port, rb, rb & 1u);
-      if (!(rb & PS_CCS)) pp_worked = true;
+      if (!(rb & PS_CCS))
+        pp_worked = true;
 
       PORT32(port, 0) = wval | PS_PP;
       mb();
       if (pp_worked) {
         for (int i = 0; i < 50; i++) {
-          for (volatile long j = 0; j < 5000000LL; j++) ;
+          ksleep_ms(5);
           ps = PORT32(port, 0);
-          if (ps & PS_CCS) break;
+          if (ps & PS_CCS)
+            break;
         }
-        for (volatile long j = 0; j < 5000000LL; j++) ;  // settle
+        ksleep_ms(5); // settle
         ps = PORT32(port, 0);
         pls = (ps >> 5) & 0xf;
         klogf(LOG_TRACE, "xHCI: port %u after power cycle: PORTSC=%x PLS=%u", (uint)port, ps, pls);
-        if (ps & PS_PED) return true;
+        if (ps & PS_PED)
+          return true;
         if (pls == 7) {
           for (int i = 0; i < 50; i++) {
-            for (volatile long j = 0; j < 5000000LL; j++) ;
+            ksleep_ms(10);
             ps = PORT32(port, 0);
             pls = (ps >> 5) & 0xf;
-            if (ps & PS_PED) return true;
-            if (pls != 7) break;
+            if (ps & PS_PED)
+              return true;
+            if (pls != 7)
+              break;
           }
           ps = PORT32(port, 0);
           pls = (ps >> 5) & 0xf;
-          if (ps & PS_PED) return true;
+          if (ps & PS_PED)
+            return true;
         }
       } else {
         ps = PORT32(port, 0);
@@ -623,6 +635,7 @@ static bool port_reset(int port) {
   // Issue PR=1.
   ps = PORT32(port, 0);
   ps &= ~PS_RW1C;
+  ps &= ~PS_PED; // never write PED=1 (RW1CS on USB2: disables port)
   ps |= PS_PR;
   PORT32(port, 0) = ps;
   mb();
@@ -632,12 +645,31 @@ static bool port_reset(int port) {
           (uint)port, rb, (rb >> 4) & 1u);
   }
 
+  bool pr_cleared = false;
   for (int i = 0; i < 5000000; i++)
-    if (!(PORT32(port, 0) & PS_PR))
+    if (!(PORT32(port, 0) & PS_PR)) {
+      pr_cleared = true;
       break;
+    }
+
+  klogf(LOG_TRACE, "xHCI: port %u PR cleared=%d PORTSC=%x",
+        (uint)port, (int)pr_cleared, PORT32(port, 0));
+
+  ksleep_ms(100); // allow USB3 link training to settle after PR clears
+
+  klogf(LOG_TRACE, "xHCI: port %u after 100ms PORTSC=%x", (uint)port, PORT32(port, 0));
 
   uint ps2 = PORT32(port, 0);
+  if (ps2 & PS_PED) {
+    // Clear PRC status without touching PED (RW1CS on USB2: writing 1 disables the port).
+    uint clr = (ps2 & ~PS_RW1C & ~PS_PED) | PS_PRC;
+    PORT32(port, 0) = clr;
+    mb();
+    return true;
+  }
+
   ps2 &= ~PS_RW1C;
+  ps2 &= ~PS_PED; // never write PED=1 (would disable USB2 port)
   ps2 |= PS_PRC;
   PORT32(port, 0) = ps2;
   mb();
@@ -695,10 +727,15 @@ static int address_device(int sid, int port, int speed, int max_pkt0, bool bsr) 
 
   // EP0 context: type=Control(4), cerr=3, max_packet_size
   slot_t *s = &g_slots[sid];
+  // Set dequeue pointer to the current enqueue position, not ring[0].
+  // ADDRESS_DEVICE resets the hardware consumer to whatever we put here; if we
+  // always wrote ring[0] the hardware would replay already-consumed TRBs
+  // (their cycle bits still match), causing xfer_wait to find stale events.
+  ulong ep0_deq = s->ep0_ring_phys + (ulong)s->ep0_enq * sizeof(trb_t);
   ictx_ep(1)[1] = (3u << 1) | (4u << 3) | ((uint)max_pkt0 << 16);
-  ictx_ep(1)[2] = (uint)(s->ep0_ring_phys & 0xFFFFFFFF) | 1; // deq low + DCS
-  ictx_ep(1)[3] = (uint)(s->ep0_ring_phys >> 32);            // deq high
-  ictx_ep(1)[4] = 8;                                         // avg TRB length
+  ictx_ep(1)[2] = (uint)(ep0_deq & 0xFFFFFFFF) | (s->ep0_pcs ? 1u : 0u);
+  ictx_ep(1)[3] = (uint)(ep0_deq >> 32);
+  ictx_ep(1)[4] = 8; // avg TRB length
 
   mb();
 
@@ -1290,8 +1327,8 @@ static bool enumerate_port(int port) {
       // HID boot keyboard
       if (cur_class == 3 && cur_sub == 1 && cur_proto == 1)
         kbd_iface = cur_iface;
-      // Mass Storage / BOT
-      if (cur_class == 8 && cur_sub == 6 && cur_proto == 0x50)
+      // Mass Storage / BOT — accept any subclass, BOT protocol only
+      if (cur_class == 8 && cur_proto == 0x50)
         msc_iface = cur_iface;
     } else if (dtype == 5) { // Endpoint descriptor
       int ep_max = (int)((ushort)desc[4] | ((ushort)desc[5] << 8)) & 0x7ff;
@@ -1365,6 +1402,7 @@ static bool enumerate_port(int port) {
 // ── xhci_poll ─────────────────────────────────────────────────────────────────
 
 void xhci_poll(void) {
+  PERF_SCOPE("xhci_poll");
   if (!g_xhci_ok)
     return;
 
@@ -1464,7 +1502,7 @@ void xhci_init(void) {
       ulong va = (ulong)PHYS_TO_HHDM(mmio_phys);
       ulong va_end = va + 1024 * 1024;
       for (; va < va_end; va += 4096)
-        __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+        __asm__ volatile("invlpg (%0)" ::"r"(va) : "memory");
     }
 
     g_cap = (volatile ubyte *)PHYS_TO_HHDM(mmio_phys);
@@ -1516,37 +1554,38 @@ void xhci_init(void) {
 
     g_xhci_ok = true;
 
-    // Wait ~200ms for devices to reconnect and complete link training after HCRST.
-    for (volatile long i = 0; i < 200000000LL; i++)
-      ;
+    ksleep_ms(500); // wait for devices to reconnect after HCRST
 
-    // Track which ports have been attempted so retries don't re-enumerate them.
-    bool port_tried[32];
+    // Track which ports have been successfully enumerated.
+    bool port_done[32];
     for (int i = 0; i < 32; i++)
-      port_tried[i] = false;
+      port_done[i] = false;
 
     // Initial scan — log all port states.
     for (uint p = 0; p < max_ports && p < 32; p++) {
       uint portsc = PORT32(p, 0);
-      klogf(LOG_TRACE, "xHCI: port %u PORTSC=%x", p, portsc);
+      uint spd = (portsc >> 10) & 0xf;
+      uint pls = (portsc >> 5) & 0xf;
+      klogf(LOG_TRACE, "xHCI: port %u PORTSC=%x CCS=%u PED=%u PLS=%u SPD=%u",
+            p, portsc, portsc & 1u, (portsc >> 1) & 1u, pls, spd);
       if (portsc & PS_CCS) {
-        port_tried[p] = true;
-        enumerate_port((int)p);
+        if (enumerate_port((int)p))
+          port_done[p] = true;
       }
     }
 
-    // Retry for up to ~2 s for SuperSpeed devices that need longer link training.
+    // Retry for up to ~4 s. Re-attempt every connected port that hasn't succeeded
+    // yet — covers both new arrivals and ports whose reset failed on the prior round.
     for (int retry = 0; retry < 20 && g_msc_slot == 0; retry++) {
-      for (volatile long j = 0; j < 100000000LL; j++)
-        ;
+      ksleep_ms(200);
       for (uint p = 0; p < max_ports && p < 32; p++) {
-        if (port_tried[p])
+        if (port_done[p])
           continue;
         uint portsc = PORT32(p, 0);
         if (portsc & PS_CCS) {
-          port_tried[p] = true;
           klogf(LOG_TRACE, "xHCI: retry%d port %u PORTSC=%x", retry, p, portsc);
-          enumerate_port((int)p);
+          if (enumerate_port((int)p))
+            port_done[p] = true;
         }
       }
     }

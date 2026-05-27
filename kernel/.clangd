@@ -1,2 +1,5 @@
 Completion:
   HeaderInsertion: IWYU
+
+CompileFlags:
+  Add: [-DKERNEL_PERF]

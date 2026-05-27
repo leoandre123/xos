@@ -95,6 +95,9 @@ void kernel_main() {
   console_set_bg_color(0xa8328b);
   klogf(LOG_INFO, "LeOS!");
   klogf(LOG_INFO, "Hello from kernel!");
+#ifdef KERNEL_PERF
+  klogf(LOG_INFO, "Performance monitoring activated");
+#endif
 
   gdt_init();
   klogf(LOG_INFO, "GDT initialized...");
@@ -141,6 +144,8 @@ void kernel_main() {
 
   klogf(LOG_INFO, "NETWORK LOGGING ENABLED");
 
+  timer_init(250);
+
   if (!g_fast_boot) {
     klogf(LOG_INFO, "Initializing USB...");
     usb_init();
@@ -156,24 +161,6 @@ void kernel_main() {
   scheduler_init();
   klogf(LOG_DEBUG, "Scheduler initilized!");
 
-  // TODO: Move to system process
-  // Read /init to pick the first process ("d" → dafne, else terminal)
-  // const char *init_elf = "/terminal.elf";
-  // const char *init_name = "terminal";
-  // file_handle init_cfg = file_open("/boot/init");
-  // if (init_cfg) {
-  //   char first = 0;
-  //   file_read(init_cfg, &first, 1);
-  //   if (first == 'd') {
-  //     init_elf = "/dafne.elf";
-  //     init_name = "dafne";
-  //   }
-  //   klogf(LOG_TRACE, "Init letter: %c(%d)", first, first);
-  //   klogf(LOG_INFO, "Init file loaded. Configuration: %s", init_name);
-  // } else {
-  //   klogf(LOG_WARNING, "Failed to load init file");
-  // }
-
   pid init_pid = process_exec("/sys/programs/system.elf", -1, -1, 0, 0);
 
   if (!init_pid) {
@@ -186,7 +173,6 @@ void kernel_main() {
   serial_printf("%04u-%02u-%02u %02u:%02u:%02u\n",
                 t.year, t.month, t.day, t.hour, t.minute, t.second);
 
-  timer_init(1000);
   if (!g_fast_boot) {
     klogf(LOG_DEBUG, "Sleep...");
     ksleep_ms(4000);
@@ -202,8 +188,10 @@ void kernel_main() {
   if (!g_fast_boot) {
     gfx_clear(RGB(82, 50, 49));
     bitmap *logo = img_load("/logo.lbm");
-    gfx_img(100, 100, logo);
-    kfree(logo);
+    if (logo) {
+      gfx_img(100, 100, logo);
+      kfree(logo);
+    }
     ksleep_ms(4000);
   }
   klogf(LOG_INFO, "Starting scheduler...");

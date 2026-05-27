@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fb_info.h"
+#include "scheduler/task.h"
 #include "types.h"
 #include "wm_event.h"
 
@@ -15,5 +16,6 @@ ulong wm_window_create(struct task *client, ushort width, ushort height,
 void wm_present_window(window_handle handle);
 int wm_post_event(window_handle handle, window_event *ev);
 int wm_window_poll_event(window_handle handle, window_event *ev);
+bool wm_window_poll_event_set_listener(window_handle handle, task *t);
 
 void wm_get_framebuffer(window_handle handle, fb_info *fb);

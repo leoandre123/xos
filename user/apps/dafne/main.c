@@ -213,6 +213,7 @@ int main(void) {
     handle_input();
     compositor_run();
     send_paint_events();
-    sys_yield();
+    sleep(7);
+    // sys_yield();
   }
 }

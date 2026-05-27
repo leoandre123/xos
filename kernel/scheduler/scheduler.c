@@ -9,6 +9,7 @@
 #include "memory/vmm.h"
 #include "noreturn.h"
 #include "panic.h"
+#include "perf/perf.h"
 #include "scheduler/process.h"
 #include "scheduler/process_manager.h"
 #include "task.h"
@@ -43,6 +44,19 @@ static task *scheduler_pick_next(void) {
     return g_task_list;
   }
 
+  if (g_current == g_idle) {
+    // g_idle is not in the task list (next == NULL); scan from the list head
+    if (!g_task_list)
+      return g_idle;
+    task *t = g_task_list;
+    do {
+      if (t->state == TASK_READY)
+        return t;
+      t = t->next;
+    } while (t != g_task_list);
+    return g_idle;
+  }
+
   task *t = g_current->next;
 
   // Loop over the next tasks after the current one until a ready one is found or we are back where we started
@@ -61,8 +75,10 @@ static task *scheduler_pick_next(void) {
   return g_idle;
 }
 static void idle() {
-  for (;;)
+  for (;;) {
+    PERF_SCOPE("idle");
     asm volatile("hlt");
+  }
 }
 static task *task_create(void (*entry)(void *), void *args) {
   task *t = kmalloc(sizeof(task));
@@ -105,16 +121,23 @@ static task *task_create(void (*entry)(void *), void *args) {
 void schedule() {
   if (!g_scheduler_running)
     return;
+
+  PERF_BEGIN("schedule");
+
   task *next = scheduler_pick_next();
   task *prev = g_current;
-  if (!next || next == prev)
+  if (!next || next == prev) {
+    PERF_END();
     return;
+  }
 
   if (prev && prev->state == TASK_RUNNING)
     prev->state = TASK_READY;
 
   g_current = next;
   g_current->state = TASK_RUNNING;
+
+  PERF_MODE_SWITCH(prev, next);
 
   __asm__ volatile("cli");
 
@@ -127,6 +150,7 @@ void schedule() {
     vmm_switch_address_space(&g_kernel_address_space);
   }
 
+  PERF_END();
   if (prev) {
     context_switch((ulong *)&prev->kernel_rsp, (ulong)next->kernel_rsp);
   } else {
@@ -134,6 +158,8 @@ void schedule() {
     serial_write_line("First context_switch");
     context_switch(&dummy, (ulong)next->kernel_rsp);
   }
+
+  PERF_MODE_RESUME(g_current);
 
   __asm__ volatile("sti");
 }
@@ -261,6 +287,7 @@ bool sleep_queue_enqueue(task *t, ulong wake_tick) {
 }
 
 void sleep_queue_wake(ulong current_tick) {
+  PERF_SCOPE("sleep_queue_wake");
   int i = 0;
   while (i < g_sleep_queue_len && g_sleep_queue[i].wake_tick <= current_tick) {
     task_set_ready(g_sleep_queue[i].t);

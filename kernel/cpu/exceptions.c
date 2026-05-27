@@ -1,6 +1,7 @@
 #include "exceptions.h"
 #include "graphics/console.h"
 #include "idt.h"
+#include "io/logging.h"
 #include "io/serial.h"
 #include "panic.h"
 #include "scheduler/process.h"
@@ -194,28 +195,26 @@ void pagefault_handler(interrupt_frame *frame) {
   }
 }
 void pagefault_handler2(interrupt_frame *frame) {
-  console_writef("===== PAGE FAULT =====\n");
+  klogf(LOG_CRITICAL, "===== PAGE FAULT =====");
 
   ulong cr2;
   asm volatile("mov %%cr2, %0" : "=r"(cr2));
-  console_writef("CR2: %x\n", cr2);
-  console_writef("RIP: %x\n", frame->rip);
-
-  console_writef("Page present: %s\n", frame->error_code & 1 ? "Yes" : "No");
-  console_writef("Write: %s\n", (frame->error_code >> 1) & 1 ? "Yes" : "No");
-  console_writef("User: %s\n", (frame->error_code >> 2) & 1 ? "Yes" : "No");
-  console_writef("Instruction fetch: %s\n", (frame->error_code >> 4) & 1 ? "Yes" : "No");
-
-  console_writef("RSP: %x\n", frame->rsp);
-  console_writef("RAX: %x\n", frame->rax);
-  console_writef("RBX: %x\n", frame->rbx);
-  console_writef("RCX: %x\n", frame->rcx);
-  console_writef("RDX: %x\n", frame->rdx);
+  klogf(LOG_CRITICAL, "CR2: %x", cr2);
+  klogf(LOG_CRITICAL, "RIP: %x", frame->rip);
+  klogf(LOG_CRITICAL, "Page present: %s", frame->error_code & 1 ? "Yes" : "No");
+  klogf(LOG_CRITICAL, "Write: %s", (frame->error_code >> 1) & 1 ? "Yes" : "No");
+  klogf(LOG_CRITICAL, "User: %s", (frame->error_code >> 2) & 1 ? "Yes" : "No");
+  klogf(LOG_CRITICAL, "Instruction fetch: %s\n", (frame->error_code >> 4) & 1 ? "Yes" : "No");
+  klogf(LOG_CRITICAL, "RSP: %x", frame->rsp);
+  klogf(LOG_CRITICAL, "RAX: %x", frame->rax);
+  klogf(LOG_CRITICAL, "RBX: %x", frame->rbx);
+  klogf(LOG_CRITICAL, "RCX: %x", frame->rcx);
+  klogf(LOG_CRITICAL, "RDX: %x", frame->rdx);
 
   task *curr = scheduler_current();
 
   if (curr && curr->owner) {
-    console_writef(curr->owner->name);
+    klogf(LOG_CRITICAL, curr->owner->name);
   }
 
   dump_frame(frame);

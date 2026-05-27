@@ -19,7 +19,7 @@
 #define PAGE_PRESENT       (1ULL << 0)
 #define PAGE_WRITABLE      (1ULL << 1)
 #define PAGE_USER          (1ULL << 2)
-#define PAGE_CACHE_DISABLE (1ULL << 4)  // PCD: bypass CPU cache for MMIO
+#define PAGE_CACHE_DISABLE (1ULL << 4) // PCD: bypass CPU cache for MMIO
 #define PAGE_HUGE          (1ULL << 7)
 #define PAGE_NX            (1ULL << 63)
 
