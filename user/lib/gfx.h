@@ -12,6 +12,9 @@
 
 #define RGB(r, g, b) ((0xffu << 24u) | (r << 16u) | (g << 8u) | (b))
 #define ARGB(a, r, g, b) ((a << 24u) | (r << 16u) | (g << 8u) | (b))
+#define RED(col) ((col >> 16) & 0xFF)
+#define GREEN(col) ((col >> 8) & 0xFF)
+#define BLUE(col) ((col) & 0xFF)
 
 extern rect g_clip_rect;
 
@@ -105,8 +108,8 @@ static inline void gfx_fill(fb_info *fb, uint color) {
   fb_mark_dirty(fb, (uint)x1, (uint)y1, g_clip_rect.w, g_clip_rect.h);
 }
 
-__attribute__((noinline, optimize("O2"))) static void
-gfx_rect(fb_info *fb, int x, int y, uint w, uint h, uint color) {
+static inline void gfx_rect(fb_info *fb, int x, int y, uint w, uint h,
+                            uint color) {
   int x1 = x > g_clip_rect.x ? x : g_clip_rect.x;
   int y1 = y > g_clip_rect.y ? y : g_clip_rect.y;
   int x2 = x + (int)w < g_clip_rect.x + g_clip_rect.w
@@ -136,6 +139,50 @@ gfx_rect(fb_info *fb, int x, int y, uint w, uint h, uint color) {
             ((src_g * src_a + ((dst >> 8) & 0xFF) * inv_a) / 255) << 8 |
             ((src_b * src_a + (dst & 0xFF) * inv_a) / 255);
       }
+  }
+  fb_mark_dirty(fb, (uint)x1, (uint)y1, (uint)(x2 - x1), (uint)(y2 - y1));
+}
+
+static inline void gfx_rect_gradient(fb_info *fb, int x, int y, uint w, uint h,
+                                     uint color1, uint color2, int angle) {
+  int x1 = x > g_clip_rect.x ? x : g_clip_rect.x;
+  int y1 = y > g_clip_rect.y ? y : g_clip_rect.y;
+  int x2 = x + (int)w < g_clip_rect.x + g_clip_rect.w
+               ? x + (int)w
+               : g_clip_rect.x + g_clip_rect.w;
+  int y2 = y + (int)h < g_clip_rect.y + g_clip_rect.h
+               ? y + (int)h
+               : g_clip_rect.y + g_clip_rect.h;
+  if (x1 >= x2 || y1 >= y2)
+    return;
+  uint pitch_px = fb->pitch / 4;
+
+  for (int dy = y1; dy < y2; dy++) {
+    for (int dx = x1; dx < x2; dx++) {
+
+      // uint color = color1 + color2;
+
+      float t = ((float)dx - x) / w;
+      int r = LERP(RED(color1), RED(color2), t);
+      int g = LERP(GREEN(color1), GREEN(color2), t);
+      int b = LERP(BLUE(color1), BLUE(color2), t);
+
+      uint color = RGB(r, g, b);
+      uint src_a = (color >> 24) & 0xFF;
+      uint src_r = (color >> 16) & 0xFF;
+      uint src_g = (color >> 8) & 0xFF;
+      uint src_b = color & 0xFF;
+      uint inv_a = 255 - src_a;
+      if (src_a == 255)
+        fb->ptr[(uint)dy * pitch_px + (uint)dx] = color;
+      else if (src_a > 0) {
+        uint dst = fb->ptr[(uint)dy * pitch_px + (uint)dx];
+        fb->ptr[(uint)dy * pitch_px + (uint)dx] =
+            ((src_r * src_a + ((dst >> 16) & 0xFF) * inv_a) / 255) << 16 |
+            ((src_g * src_a + ((dst >> 8) & 0xFF) * inv_a) / 255) << 8 |
+            ((src_b * src_a + (dst & 0xFF) * inv_a) / 255);
+      }
+    }
   }
   fb_mark_dirty(fb, (uint)x1, (uint)y1, (uint)(x2 - x1), (uint)(y2 - y1));
 }
@@ -370,6 +417,94 @@ static inline void gfx_blit_region(fb_info *dst, int dx, int dy, fb_info *src,
 // effect when the subrect overlaps a corner of src.
 static inline void gfx_blit_region_rounded(fb_info *dst, int dx, int dy,
                                            fb_info *src, int sx, int sy,
+                                           uint sw, uint sh, int r);
+
+// Like gfx_blit_region_rounded but with independent corner radii (TL, TR, BR,
+// BL). The mask is relative to the full src surface, not the subrect.
+static inline void gfx_blit_region_rounded4(fb_info *dst, int dx, int dy,
+                                            fb_info *src, int sx, int sy,
+                                            uint sw, uint sh, int r_tl,
+                                            int r_tr, int r_br, int r_bl) {
+  if (sx < 0) {
+    dx -= sx;
+    sw += (uint)sx;
+    sx = 0;
+  }
+  if (sy < 0) {
+    dy -= sy;
+    sh += (uint)sy;
+    sy = 0;
+  }
+  if ((uint)sx + sw > src->width)
+    sw = src->width - (uint)sx;
+  if ((uint)sy + sh > src->height)
+    sh = src->height - (uint)sy;
+
+  int W = (int)src->width, H = (int)src->height;
+  uint dst_pitch_px = dst->pitch / 4;
+  uint src_pitch_px = src->pitch / 4;
+
+  for (uint row = 0; row < sh; row++) {
+    int fy = sy + (int)row;
+
+    // left edge of rounded mask in src-surface x coords
+    int fx0 = 0;
+    if (fy < r_tl) {
+      int oy = r_tl - fy;
+      int xc = r_tl - (int)gfx_isqrt((uint)(r_tl * r_tl - oy * oy));
+      if (xc > fx0)
+        fx0 = xc;
+    }
+    if (r_bl > 0 && fy >= H - r_bl) {
+      int oy = fy - (H - r_bl);
+      int xc = r_bl - (int)gfx_isqrt((uint)(r_bl * r_bl - oy * oy));
+      if (xc > fx0)
+        fx0 = xc;
+    }
+
+    // right edge of rounded mask in src-surface x coords
+    int fx1 = W;
+    if (fy < r_tr) {
+      int oy = r_tr - fy;
+      int xc = W - r_tr + (int)gfx_isqrt((uint)(r_tr * r_tr - oy * oy));
+      if (xc < fx1)
+        fx1 = xc;
+    }
+    if (r_br > 0 && fy >= H - r_br) {
+      int oy = fy - (H - r_br);
+      int xc = W - r_br + (int)gfx_isqrt((uint)(r_br * r_br - oy * oy));
+      if (xc < fx1)
+        fx1 = xc;
+    }
+
+    // intersect mask with subrect column range [sx, sx+sw)
+    int icol0 = fx0 - sx;
+    int icol1 = fx1 - sx;
+    if (icol0 < 0)
+      icol0 = 0;
+    if (icol1 > (int)sw)
+      icol1 = (int)sw;
+    if (icol0 >= icol1)
+      continue;
+
+    int d_row = dy + (int)row;
+    if (d_row < 0 || (uint)d_row >= dst->height || d_row < g_clip_rect.y ||
+        d_row >= g_clip_rect.y + (int)g_clip_rect.h)
+      continue;
+
+    for (int col = icol0; col < icol1; col++) {
+      int d_col = dx + col;
+      if (d_col < 0 || (uint)d_col >= dst->width || d_col < g_clip_rect.x ||
+          d_col >= g_clip_rect.x + (int)g_clip_rect.w)
+        continue;
+      dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
+          src->ptr[(uint)fy * src_pitch_px + (uint)sx + (uint)col];
+    }
+  }
+}
+
+static inline void gfx_blit_region_rounded(fb_info *dst, int dx, int dy,
+                                           fb_info *src, int sx, int sy,
                                            uint sw, uint sh, int r) {
   if (sx < 0) {
     dx -= sx;
@@ -441,4 +576,154 @@ static inline void gfx_img(fb_info *fb, uint x, uint y, bitmap *img) {
       gfx_pixel_blend(fb, xx, yy, img->data[(yy - y) * img->width + (xx - x)]);
     }
   }
+}
+
+// Filled rect with independent corner radii (TL, TR, BR, BL — clockwise).
+// Pass 0 for a corner to leave it square.
+static inline void gfx_rect_rounded(fb_info *fb, int x, int y, int w, int h,
+                                    uint color, int r_tl, int r_tr, int r_br,
+                                    int r_bl) {
+  uint src_a = (color >> 24) & 0xFF;
+  if (src_a == 0 || w <= 0 || h <= 0)
+    return;
+  uint src_r = (color >> 16) & 0xFF;
+  uint src_g = (color >> 8) & 0xFF;
+  uint src_b = color & 0xFF;
+  uint inv_a = 255 - src_a;
+  uint pitch_px = fb->pitch / 4;
+
+  int fy0 = y > g_clip_rect.y ? y : g_clip_rect.y;
+  int fy1 = y + h < g_clip_rect.y + (int)g_clip_rect.h
+                ? y + h
+                : g_clip_rect.y + (int)g_clip_rect.h;
+  if (fy0 >= fy1)
+    return;
+
+  for (int fy = fy0; fy < fy1; fy++) {
+    int row = fy - y;
+
+    int xl = 0;
+    if (row < r_tl) {
+      int oy = r_tl - row;
+      int xc = r_tl - (int)gfx_isqrt((uint)(r_tl * r_tl - oy * oy));
+      if (xc > xl)
+        xl = xc;
+    }
+    if (r_bl > 0 && row >= h - r_bl) {
+      int oy = row - (h - r_bl);
+      int xc = r_bl - (int)gfx_isqrt((uint)(r_bl * r_bl - oy * oy));
+      if (xc > xl)
+        xl = xc;
+    }
+
+    int xr = w;
+    if (row < r_tr) {
+      int oy = r_tr - row;
+      int xc = w - r_tr + (int)gfx_isqrt((uint)(r_tr * r_tr - oy * oy));
+      if (xc < xr)
+        xr = xc;
+    }
+    if (r_br > 0 && row >= h - r_br) {
+      int oy = row - (h - r_br);
+      int xc = w - r_br + (int)gfx_isqrt((uint)(r_br * r_br - oy * oy));
+      if (xc < xr)
+        xr = xc;
+    }
+
+    int fx0 = x + xl, fx1 = x + xr;
+    if (fx0 < g_clip_rect.x)
+      fx0 = g_clip_rect.x;
+    if (fx1 > g_clip_rect.x + (int)g_clip_rect.w)
+      fx1 = g_clip_rect.x + (int)g_clip_rect.w;
+    if (fx0 >= fx1)
+      continue;
+
+    if (src_a == 255) {
+      for (int fx = fx0; fx < fx1; fx++)
+        fb->ptr[(uint)fy * pitch_px + (uint)fx] = color;
+    } else {
+      for (int fx = fx0; fx < fx1; fx++) {
+        uint dst = fb->ptr[(uint)fy * pitch_px + (uint)fx];
+        fb->ptr[(uint)fy * pitch_px + (uint)fx] =
+            ((src_r * src_a + ((dst >> 16) & 0xFF) * inv_a) / 255) << 16 |
+            ((src_g * src_a + ((dst >> 8) & 0xFF) * inv_a) / 255) << 8 |
+            ((src_b * src_a + (dst & 0xFF) * inv_a) / 255);
+      }
+    }
+  }
+
+  int dx0 = x < 0 ? 0 : x, dy0 = y < 0 ? 0 : y;
+  fb_mark_dirty(fb, (uint)dx0, (uint)dy0, (uint)w, (uint)h);
+}
+
+// Blit src surface onto dst at (dx, dy) with independent corner radii (TL,
+// TR, BR, BL). Clips to dst bounds and clip rect.
+static inline void gfx_blit_rounded(fb_info *dst, int dx, int dy, fb_info *src,
+                                    int r_tl, int r_tr, int r_br, int r_bl) {
+  int w = (int)src->width, h = (int)src->height;
+
+  int fy0 = dy > g_clip_rect.y ? dy : g_clip_rect.y;
+  int fy1 = dy + h < g_clip_rect.y + (int)g_clip_rect.h
+                ? dy + h
+                : g_clip_rect.y + (int)g_clip_rect.h;
+  if (fy0 < 0)
+    fy0 = 0;
+  if (fy1 > (int)dst->height)
+    fy1 = (int)dst->height;
+  if (fy0 >= fy1)
+    return;
+
+  uint dst_pitch_px = dst->pitch / 4;
+  uint src_pitch_px = src->pitch / 4;
+
+  for (int fy = fy0; fy < fy1; fy++) {
+    int row = fy - dy;
+
+    int xl = 0;
+    if (row < r_tl) {
+      int oy = r_tl - row;
+      int xc = r_tl - (int)gfx_isqrt((uint)(r_tl * r_tl - oy * oy));
+      if (xc > xl)
+        xl = xc;
+    }
+    if (r_bl > 0 && row >= h - r_bl) {
+      int oy = row - (h - r_bl);
+      int xc = r_bl - (int)gfx_isqrt((uint)(r_bl * r_bl - oy * oy));
+      if (xc > xl)
+        xl = xc;
+    }
+
+    int xr = w;
+    if (row < r_tr) {
+      int oy = r_tr - row;
+      int xc = w - r_tr + (int)gfx_isqrt((uint)(r_tr * r_tr - oy * oy));
+      if (xc < xr)
+        xr = xc;
+    }
+    if (r_br > 0 && row >= h - r_br) {
+      int oy = row - (h - r_br);
+      int xc = w - r_br + (int)gfx_isqrt((uint)(r_br * r_br - oy * oy));
+      if (xc < xr)
+        xr = xc;
+    }
+
+    int fx0 = dx + xl, fx1 = dx + xr;
+    if (fx0 < g_clip_rect.x)
+      fx0 = g_clip_rect.x;
+    if (fx1 > g_clip_rect.x + (int)g_clip_rect.w)
+      fx1 = g_clip_rect.x + (int)g_clip_rect.w;
+    if (fx0 < 0)
+      fx0 = 0;
+    if (fx1 > (int)dst->width)
+      fx1 = (int)dst->width;
+    if (fx0 >= fx1)
+      continue;
+
+    memcpy(&dst->ptr[(uint)fy * dst_pitch_px + (uint)fx0],
+           &src->ptr[(uint)row * src_pitch_px + (uint)(fx0 - dx)],
+           (uint)(fx1 - fx0) * 4);
+  }
+
+  int ddx = dx < 0 ? 0 : dx, ddy = dy < 0 ? 0 : dy;
+  fb_mark_dirty(dst, (uint)ddx, (uint)ddy, (uint)w, (uint)h);
 }

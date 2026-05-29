@@ -34,6 +34,7 @@ typedef struct BootInfo {
   uint memory_map_desc_version;
   BootDevice boot_device;
   bool fast_boot;
+  ulong rsdp_phys; // ACPI RSDP physical address (0 if not found)
 } BootInfo;
 
 #endif

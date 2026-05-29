@@ -414,6 +414,27 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
   boot_info.memory_map_desc_size = desc_size;
   boot_info.memory_map_desc_version = desc_version;
 
+  // Find ACPI RSDP via EFI configuration table (ACPI 2.0 preferred, 1.0 fallback)
+  EFI_GUID acpi2_guid = {0x8868e871, 0xe4f1, 0x11d3, {0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81}};
+  EFI_GUID acpi1_guid = {0xeb9d2d30, 0x2d88, 0x11d3, {0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d}};
+  boot_info.rsdp_phys = 0;
+  for (UINTN ti = 0; ti < ST->NumberOfTableEntries; ti++) {
+    EFI_GUID *g = &ST->ConfigurationTable[ti].VendorGuid;
+    if (CompareMem(g, &acpi2_guid, sizeof(EFI_GUID)) == 0) {
+      boot_info.rsdp_phys = (uint64_t)(UINTN)ST->ConfigurationTable[ti].VendorTable;
+      break;
+    }
+  }
+  if (!boot_info.rsdp_phys) {
+    for (UINTN ti = 0; ti < ST->NumberOfTableEntries; ti++) {
+      EFI_GUID *g = &ST->ConfigurationTable[ti].VendorGuid;
+      if (CompareMem(g, &acpi1_guid, sizeof(EFI_GUID)) == 0) {
+        boot_info.rsdp_phys = (uint64_t)(UINTN)ST->ConfigurationTable[ti].VendorTable;
+        break;
+      }
+    }
+  }
+
   status = uefi_call_wrapper(BS->ExitBootServices, 2, ImageHandle, map_key);
 
   KernelEntry entry = (KernelEntry)KERNEL_LOAD_ADDR;

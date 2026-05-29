@@ -1,8 +1,10 @@
 #pragma once
-
-#include "fb_info.h"
+#include "cdefs.h"
 #include "types.h"
 
+EXTERN_C_BEGIN
+
+typedef int window_handle;
 typedef enum {
 
   // BASIC
@@ -42,6 +44,7 @@ typedef struct {
   int width;
   int height;
   int pitch;
+  window_handle handle;
 } window_create_event;
 
 typedef struct {
@@ -54,3 +57,5 @@ typedef struct {
     ubyte raw[16];
   };
 } window_event;
+
+EXTERN_C_END

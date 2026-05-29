@@ -1,6 +1,7 @@
 #include "pipe.h"
 #include "io/serial.h"
 #include "memory/heap.h"
+#include "scheduler/scheduler.h"
 
 pipe *pipe_create(void) {
   pipe *p = kmalloc(sizeof(pipe));
@@ -35,6 +36,10 @@ void pipe_write(pipe *p, const ubyte *data, uint len) {
     p->buf[p->write_pos] = data[i];
     p->write_pos = (p->write_pos + 1) % PIPE_BUF_SIZE;
     p->count++;
+  }
+  if (p->listener) {
+    task_set_ready(p->listener);
+    p->listener = 0;
   }
 }
 

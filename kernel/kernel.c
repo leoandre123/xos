@@ -1,4 +1,6 @@
 #include "../shared/boot_info.h"
+#include "acpi/acpi.h"
+#include "acpi/battery.h"
 #include "cpu/exceptions.h"
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
@@ -35,6 +37,7 @@ uint g_fb_width;
 uint g_fb_height;
 uint g_fb_pitch;
 ulong g_fb_phys;
+ulong g_rsdp_phys;
 BootDevice g_boot_device;
 bool g_fast_boot;
 
@@ -54,6 +57,7 @@ void kernel_pre_main(BootInfo *boot_info) {
   g_fb_phys = boot_info->framebuffer_base;
   g_boot_device = boot_info->boot_device;
   g_fast_boot = boot_info->fast_boot;
+  g_rsdp_phys = boot_info->rsdp_phys;
 
   uint *fb_phys = (uint *)(ulong)boot_info->framebuffer_base;
   uint pitch_px = boot_info->framebuffer_pitch / 4;
@@ -134,6 +138,9 @@ void kernel_main() {
   asm volatile("sti");
   klogf(LOG_DEBUG, "Running PCI Scan");
   pci_scan();
+
+  acpi_init(g_rsdp_phys);
+  battery_init();
 
   networking_init();
   // Windows drops packets with src 0.0.0.0 before they reach Python/nc.

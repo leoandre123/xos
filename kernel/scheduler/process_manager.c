@@ -23,24 +23,24 @@ static pid s_next_pid = 1;
 static process *s_processes = {0};
 static process *s_last_process = {0};
 
-static int handle_alloc(process *p, handle_type type, void *ptr) {
-  for (int i = 0; i < MAX_HANDLES; i++) {
-    if (p->handles[i].type == HANDLE_NONE) {
-      p->handles[i].type = type;
-      p->handles[i].ptr = ptr;
-      return i;
-    }
-  }
-  return -1;
-}
-
-static handle_entry *handle_get(process *p, int fd) {
-  if (fd < 0 || fd >= MAX_HANDLES)
-    return 0;
-  if (p->handles[fd].type == HANDLE_NONE)
-    return 0;
-  return &p->handles[fd];
-}
+// static int handle_alloc(process *p, handle_type type, void *ptr) {
+//   for (int i = 0; i < MAX_HANDLES; i++) {
+//     if (p->handles[i].type == HANDLE_NONE) {
+//       p->handles[i].type = type;
+//       p->handles[i].ptr = ptr;
+//       return i;
+//     }
+//   }
+//   return -1;
+// }
+//
+// static handle_entry *handle_get(process *p, int fd) {
+//   if (fd < 0 || fd >= MAX_HANDLES)
+//     return 0;
+//   if (p->handles[fd].type == HANDLE_NONE)
+//     return 0;
+//   return &p->handles[fd];
+// }
 
 static process *create_process() {
   process *p = kmalloc(sizeof(process));
@@ -135,7 +135,7 @@ pid process_exec(const char *path, int std_in, int std_out, int argc, const char
   t->start_argv = usp;             // argv array lives here (16-byte aligned)
   t->user_rsp = (void *)(usp - 8); // RSP 8 below → 8-mod-16 (matches "after call" ABI)
 
-  klogf(LOG_TRACE, "Process main task stack at: %x", t->stack_base);
+  // klogf(LOG_TRACE, "Process main task stack at: %x", t->stack_base);
 
   process *p = create_process();
   p->address_space = space;

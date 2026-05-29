@@ -258,7 +258,7 @@ uint fat32_read(file_handle handle, void *buf, uint count) {
 }
 
 int fat32_readdir(const char *path, file_dirent *out, int max) {
-  serial_printf("fat32_readdir: %s\n", path);
+  // serial_printf("fat32_readdir: %s\n", path);
   fat32_directory_entry entries[16];
 
   int count_read = 0;

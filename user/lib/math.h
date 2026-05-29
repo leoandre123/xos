@@ -10,4 +10,5 @@ EXTERN_C_BEGIN
 #define ALIGN_UP(val, aligntment)                                              \
   (((val) + (aligntment) - 1) / (aligntment) * (aligntment))
 
+#define LERP(a, b, t) ((a) + (t) * ((b) - (a)))
 EXTERN_C_END

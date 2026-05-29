@@ -113,9 +113,25 @@ static void vmm_map_low_identity(address_space *space) {
   vmm_map_bytes(space, 0x00, 0x00, 4000000, PAGE_PRESENT | PAGE_WRITABLE);
 }
 
+// IA32_PAT MSR layout: 8 slots × 8 bits. We keep the hardware defaults for
+// slots 0-3 and put Write-Combining in slot 4 (selected by PAT=1,PCD=0,PWT=0).
+//   PAT0=WB(06) PAT1=WT(04) PAT2=UC-(07) PAT3=UC(00)
+//   PAT4=WC(01) PAT5=WP(05) PAT6=UC-(07) PAT7=UC(00)
+#define MSR_PAT 0x277U
+#define PAT_VALUE 0x0007050100070406ULL
+
+static void wrmsr(uint msr, ulong val) {
+  __asm__ volatile("wrmsr" : : "c"(msr), "a"((uint)val), "d"((uint)(val >> 32)));
+}
+
+static void vmm_pat_init(void) {
+  wrmsr(MSR_PAT, PAT_VALUE);
+}
+
 static void vmm_map_framebuffer(address_space *space, BootInfo *boot_info) {
   ulong fb_size = boot_info->framebuffer_pitch * boot_info->framebuffer_height;
-  vmm_map_bytes(space, FB_BASE, boot_info->framebuffer_base, fb_size, PAGE_WRITABLE);
+  vmm_map_bytes(space, FB_BASE, boot_info->framebuffer_base, fb_size,
+                PAGE_WRITABLE | PAGE_WRITE_COMBINING);
 }
 
 static void vmm_map_hhdm(address_space *space) {
@@ -162,6 +178,7 @@ void vmm_init(BootInfo *boot_info) {
   g_kernel_address_space.pml4 = (page_table *)PHYS_TO_HHDM(g_kernel_address_space.pml4_phys);
   memset64((ulong *)g_kernel_address_space.pml4, 0, 512);
 
+  vmm_pat_init();
   serial_write("Mapping kernel image...");
   vmm_map_kernel_image(&g_kernel_address_space);
   serial_write_line("Done!");

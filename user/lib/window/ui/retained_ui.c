@@ -6,7 +6,6 @@
 #include "syscall.h"
 #include "types.h"
 #include "window/ui/retained_ui_internal.h"
-#include "window_event.h"
 #include <string.h>
 
 #define MAX_DIRTY_RECTS 32
@@ -20,7 +19,7 @@ int g_ui_current_buffer_idx = 0;
 
 rect g_current_dirty_rect = {0};
 ui_node g_root = {0};
-ui_node g_nodes[100];
+ui_node g_nodes[256];
 int next_idx = 0;
 ui_node *g_focused = 0;
 ulong g_ui_current_time;
@@ -72,6 +71,11 @@ static void layout_root(ui_node *node, ui_size size, ui_pos pos) {
 }
 
 ui_node *create_node(ui_node *parent) {
+  if (next_idx >= (int)(sizeof(g_nodes) / sizeof(g_nodes[0]))) {
+    sys_write("UI: node pool exhausted\n");
+    for (;;)
+      sys_yield();
+  }
   ui_node *node = &g_nodes[next_idx++];
   node->parent = parent;
   node->visible = true;

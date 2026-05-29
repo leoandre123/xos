@@ -1,21 +1,26 @@
 #pragma once
+#include "dafne/dafne_event.h"
 #include "fb_info.h"
-#include "gfx.h"
-#include "window_event.h"
-#include "wm_event.h"
 
-#define WINDOW_TITLE_BAR_HEIGHT 25
+#define WINDOW_TITLE_BAR_HEIGHT 35
+#define WINDOW_BUTTON_WIDTH 45
+#define WINDOW_BORDER_RADIUS 7
+
 #define WINDOW_MAX_COUNT 10
 
-typedef struct {
+struct client;
+
+typedef struct window {
   bool exists;
+  window_handle handle;
   bool title_dirty;
-  bool focused;
+  // bool focused;
   bool moved;
   bool hidden;
   bool hover_minimize;
   bool hover_close;
   bool presented;
+  bool double_buffer;
   fb_info front_buf;
   fb_info back_buf;
   void *usr_front_buf;
@@ -26,12 +31,8 @@ typedef struct {
   int prev_x;
   int prev_y;
   char title[32];
+  struct client *client;
+
+  struct window *prev;
+  struct window *next;
 } window;
-
-void window_focus(window *w);
-void window_focus_next();
-void window_move_to(window *w, int x, int y);
-void window_show(window *w, bool show);
-
-void window_post_event(window *w, window_event *event);
-void window_swap_buffers(window *w);

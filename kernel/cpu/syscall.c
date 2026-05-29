@@ -1,16 +1,16 @@
 #include "syscall.h"
-#include "compositor/window_manager.h"
+#include "acpi/battery.h"
 #include "cpu_info.h"
 #include "fb_info.h"
 #include "filesystem/file.h"
 #include "gdt.h"
 #include "graphics/console.h"
-#include "io/e1000.h"
 #include "io/keyboard.h"
 #include "io/mouse.h"
 #include "io/serial.h"
 #include "io/time.h"
 #include "io/timer.h"
+#include "ipc/channel.h"
 #include "ipc/pipe.h"
 #include "keys.h"
 #include "mem_info.h"
@@ -50,24 +50,24 @@ extern ulong g_fb_phys;
 //  uint pitch; // bytes per scanline
 //} kernel_fb_info;
 
-static int handle_alloc(task *t, handle_type type, void *ptr) {
-  for (int i = 0; i < MAX_HANDLES; i++) {
-    if (t->owner->handles[i].type == HANDLE_NONE) {
-      t->owner->handles[i].type = type;
-      t->owner->handles[i].ptr = ptr;
-      return i;
-    }
-  }
-  return -1;
-}
-
-static handle_entry *handle_get(task *t, int fd) {
-  if (fd < 0 || fd >= MAX_HANDLES)
-    return 0;
-  if (t->owner->handles[fd].type == HANDLE_NONE)
-    return 0;
-  return &t->owner->handles[fd];
-}
+// static int handle_alloc(task *t, handle_type type, void *ptr) {
+//   for (int i = 0; i < MAX_HANDLES; i++) {
+//     if (t->owner->handles[i].type == HANDLE_NONE) {
+//       t->owner->handles[i].type = type;
+//       t->owner->handles[i].ptr = ptr;
+//       return i;
+//     }
+//   }
+//   return -1;
+// }
+//
+// static handle_entry *handle_get(task *t, int fd) {
+//   if (fd < 0 || fd >= MAX_HANDLES)
+//     return 0;
+//   if (t->owner->handles[fd].type == HANDLE_NONE)
+//     return 0;
+//   return &t->owner->handles[fd];
+// }
 
 #define MSR_EFER         0xC0000080
 #define MSR_STAR         0xC0000081
@@ -172,8 +172,8 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     if (!p)
       return (ulong)-1;
     task *t = scheduler_current();
-    int read_fd = handle_alloc(t, HANDLE_PIPE_READ, p);
-    int write_fd = handle_alloc(t, HANDLE_PIPE_WRITE, p);
+    int read_fd = handle_alloc(t->owner, HANDLE_PIPE_READ, p);
+    int write_fd = handle_alloc(t->owner, HANDLE_PIPE_WRITE, p);
     if (read_fd < 0 || write_fd < 0)
       return (ulong)-1;
     pipe_retain(p); // now referenced by both ends
@@ -184,7 +184,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   case SYS_READ_FD: {
     PERF_SCOPE("SYS_READ_FD");
     task *t = scheduler_current();
-    handle_entry *h = handle_get(t, (int)arg1);
+    handle_entry *h = handle_get(t->owner, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_READ)
       return (ulong)-1;
     pipe *p = (pipe *)h->ptr;
@@ -205,7 +205,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   case SYS_WRITE_FD: {
     PERF_SCOPE("SYS_WRITE_FD");
     task *t = scheduler_current();
-    handle_entry *h = handle_get(t, (int)arg1);
+    handle_entry *h = handle_get(t->owner, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_WRITE)
       return (ulong)-1;
     pipe *p = (pipe *)h->ptr;
@@ -218,7 +218,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     task *t = scheduler_current();
     ulong fb_size = (ulong)g_fb_height * g_fb_pitch;
     vmm_map_bytes(t->owner->address_space, USER_FB_VADDR, g_fb_phys, fb_size,
-                  PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+                  PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER | PAGE_WRITE_COMBINING);
     fb_info *info = (fb_info *)arg1;
     info->ptr = (uint *)USER_FB_VADDR;
     info->width = g_fb_width;
@@ -230,7 +230,7 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   case SYS_PIPE_AVAIL: {
     PERF_SCOPE("SYS_PIPE_AVAIL");
     task *t = scheduler_current();
-    handle_entry *h = handle_get(t, (int)arg1);
+    handle_entry *h = handle_get(t->owner, (int)arg1);
     if (!h || h->type != HANDLE_PIPE_READ)
       return (ulong)-1;
     return (ulong)pipe_available((pipe *)h->ptr);
@@ -281,6 +281,45 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     ulong pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
     vmm_unmap_and_free_pages(t->owner->address_space, vaddr, pages);
     return 0;
+  }
+
+  // arg1=size, arg2=ch handle, arg3=[OUT]client_vaddr
+  case SYS_ALLOC_SHARED: {
+    PERF_SCOPE("SYS_ALLOC_SHARED");
+    task *t = scheduler_current();
+    ulong size = arg1;
+    if (size == 0)
+      return 0;
+
+    handle_entry *handle = handle_get(t->owner, arg2);
+    if (!handle)
+      return 0;
+    channel *ch = handle->ptr;
+    if (!ch)
+      return 0;
+    if (ch->pids[1] != t->owner->pid)
+      return 0;
+    process *client = find_process(ch->pids[0]);
+    if (!client)
+      return 0;
+
+    ulong pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    ulong phys = pmm_alloc_pages(pages);
+    if (!phys)
+      return 0;
+
+    ulong vaddr = t->owner->heap_next;
+    vmm_map_pages(t->owner->address_space, vaddr, phys, pages,
+                  PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+    t->owner->heap_next += pages * PAGE_SIZE;
+
+    ulong client_vaddr = client->heap_next;
+    vmm_map_pages(client->address_space, client_vaddr, phys, pages,
+                  PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+    client->heap_next += pages * PAGE_SIZE;
+
+    *((ulong *)arg3) = client_vaddr;
+    return vaddr;
   }
 
   case SYS_YIELD: {
@@ -454,70 +493,6 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return 0;
   }
 
-  case SYS_WM_REGISTER: {
-    PERF_SCOPE("SYS_WM_REGISTER");
-    task *t = scheduler_current();
-    return (ulong)wm_register(t);
-  }
-
-  case SYS_WM_POLL: {
-    // arg1 = pointer to wm in user space
-    PERF_SCOPE("SYS_WM_POLL");
-    return (ulong)wm_poll((wm_event *)arg1);
-  }
-
-  case SYS_WINDOW_CREATE: {
-    PERF_SCOPE("SYS_WINDOW_CREATE");
-    // arg1=window_create_options*; returns window_handle or 0
-    typedef struct {
-      ushort width;
-      ushort height;
-      const char *title;
-    } wc_opts;
-    wc_opts *opts = (wc_opts *)arg1;
-    task *t = scheduler_current();
-    window_handle handle = 0;
-    ulong vaddr = wm_window_create(t, opts->width, opts->height,
-                                   opts->title, &handle);
-    if (!vaddr)
-      return (ulong)-1;
-    return handle;
-  }
-
-  case SYS_WINDOW_PRESENT: {
-    PERF_SCOPE("SYS_WINDOW_PRESENT");
-    wm_present_window((window_handle)arg1);
-    return 0;
-  }
-
-  case SYS_WINDOW_POST_EVENT: {
-    PERF_SCOPE("SYS_WINDOW_POST_EVENT");
-    return (ulong)wm_post_event((window_handle)arg1, (window_event *)arg2);
-  }
-  case SYS_WINDOW_POLL: {
-    PERF_SCOPE("SYS_WINDOW_POLL");
-    int ev = wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
-
-    if (ev)
-      return ev;
-    task *t = scheduler_current();
-    if (!wm_window_poll_event_set_listener((window_handle)arg1, t)) {
-      return 0;
-    }
-    task_set_blocked(t);
-    schedule();
-    return (ulong)wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
-  }
-
-    // case SYS_WINDOW_POLL:
-    //   return (ulong)wm_window_poll_event((window_handle)arg1, (window_event *)arg2);
-
-  case SYS_WINDOW_FRAMEBUFFER: {
-    PERF_SCOPE("SYS_WINDOW_FRAMEBUFFER");
-    wm_get_framebuffer(arg1, (fb_info *)arg2);
-    return 0;
-  }
-
   case SYS_STATS_MEMORY: {
     PERF_SCOPE("SYS_STATS_MEMORY");
     mem_info *info = (mem_info *)arg1;
@@ -554,6 +529,53 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     info->logical_cores = cores > 0 ? cores : 1;
 
     return 0;
+  }
+
+  case SYS_BATTERY_INFO: {
+    PERF_SCOPE("SYS_BATTERY_INFO");
+    battery_info *info = (battery_info *)arg2;
+    return battery_get((uint)arg1, info) ? 1 : 0;
+  }
+
+  case SYS_IPC_SERVER: {
+    PERF_SCOPE("SYS_IPC_SERVER");
+    return ipc_server((const char *)arg1);
+  }
+  case SYS_IPC_SERVER_ACCEPT: {
+    PERF_SCOPE("SYS_IPC_SERVER_ACCEPT");
+    return ipc_accept(arg1);
+  }
+  case SYS_IPC_SERVER_ACCEPT_NB: {
+    PERF_SCOPE("SYS_IPC_SERVER_ACCEPT");
+    return ipc_accept_nb(arg1);
+  }
+  case SYS_IPC_SERVER_CONNECT: {
+    PERF_SCOPE("SYS_IPC_SERVER_CONNECT");
+    return ipc_connect((const char *)arg1);
+  }
+  case SYS_IPC_SEND: {
+    PERF_SCOPE("SYS_IPC_SEND");
+    channel_send(arg1, (const void *)arg2, arg3);
+    return 0;
+  }
+  case SYS_IPC_RECV: {
+    PERF_SCOPE("SYS_IPC_RECV");
+
+    int read_len = channel_recv(arg1, (void *)arg2, arg3);
+    if (read_len)
+      return read_len;
+
+    task *t = scheduler_current();
+    if (!channel_set_listener(arg1, t)) {
+      return 0;
+    }
+    task_set_blocked(t);
+    schedule();
+    return channel_recv(arg1, (void *)arg2, arg3);
+  }
+  case SYS_IPC_RECV_NB: {
+    PERF_SCOPE("SYS_IPC_RECV_NB");
+    return channel_recv(arg1, (void *)arg2, arg3);
   }
 
   default:

@@ -65,6 +65,21 @@ def find_ovmf():
     return code[0], vars_[0]
 
 
+def build_acpi_tables():
+    asl = os.path.join(ROOT, "acpi/battery.asl")
+    aml = os.path.join(ROOT, "acpi/battery.aml")
+    if not os.path.exists(asl):
+        return
+    if os.path.exists(aml) and os.path.getmtime(aml) >= os.path.getmtime(asl):
+        return
+    if not shutil.which("iasl"):
+        console.print("  [yellow]iasl not found — skipping ACPI battery table[/yellow]  "
+                      "[dim](install: sudo apt install acpica-tools)[/dim]")
+        return
+    run("iasl", asl, label="iasl battery.asl")
+    ok("ACPI battery table")
+
+
 def build(perf=False):
     section("Build")
 
@@ -96,6 +111,8 @@ def build(perf=False):
             progress.advance(task)
 
     ok(f"{len(app_dirs)} user app(s) + service(s)")
+
+    build_acpi_tables()
 
 
 def prepare_esp():
@@ -137,14 +154,10 @@ def create_image(image):
     run("dd", "if=/dev/zero", f"of={image}", "bs=1M", "count=128", "status=none",
         label="Zeroing 128 MB image")
 
-    gpt = (
-        f"label: gpt\n"
-        f"start={EFI_PART_LBA},  size={DATA_PART_LBA - EFI_PART_LBA},"
-        f" type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n"
-        f"start={DATA_PART_LBA}, size=+,"
-        f" type=0FC63DAF-8483-4772-8E79-3D69D8477DE4\n"
-    )
-    run("sfdisk", image, input=gpt.encode(), label="Writing GPT")
+    run("sgdisk", "--clear",
+        f"--new=1:{EFI_PART_LBA}:{DATA_PART_LBA - 1}", "--typecode=1:EF00",
+        f"--new=2:{DATA_PART_LBA}:0",                  "--typecode=2:8300",
+        image, label="Writing GPT")
     ok("Partition table")
 
     run("mformat", "-i", f"{image}@@{EFI_BYTE}", "-F", "-v", "EFI", "::", label="Formatting EFI partition")
@@ -232,9 +245,14 @@ def launch_qemu(image, drive_mode, code_fd, ovmf_vars, debug, ps2, use_sudo=Fals
     if not use_sudo:
         net += ["-object", "filter-dump,id=dump0,netdev=net0,file=/tmp/xos.pcap"]
 
+    acpi_tables = []
+    aml = os.path.join(ROOT, "acpi/battery.aml")
+    if os.path.exists(aml):
+        acpi_tables = ["-acpitable", f"file={aml}"]
+
     cmd = ["qemu-system-x86_64", "-m", "256M", "-cpu", "max", "-smp", "4", *drives,
            *net, "-device", "qemu-xhci,id=xhci", *usb_devs,
-           "-serial", "stdio"]
+           *acpi_tables, "-serial", "stdio"]
     if not use_sudo:
         cmd += ["-d", "int,cpu_reset", "-D", "/tmp/qemu.log"]
     if debug:

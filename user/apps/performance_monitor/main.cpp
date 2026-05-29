@@ -1,3 +1,4 @@
+#include "battery_info.h"
 #include "cpu_info.h"
 #include "gfx.h"
 #include "mem_info.h"
@@ -5,8 +6,6 @@
 #include "syscall.h"
 #include "syscalls.h"
 #include "window/ui/retained_ui.h"
-#include "window/window.h"
-#include "window_event.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -32,6 +31,10 @@ static int process_list(process_info *buf, int count) {
 
 static void get_mem_info(mem_info *info) {
   syscall(SYS_STATS_MEMORY, (ulong)info, 0, 0);
+}
+
+static void get_battery_info(int idx, battery_info *info) {
+  syscall(SYS_BATTERY_INFO, idx, (ulong)info, 0);
 }
 
 static const char *get_state_string(proc_state state) {
@@ -121,6 +124,9 @@ void create_perf_tab(ui_node *tabs) {
   mem_info info;
   get_mem_info(&info);
 
+  battery_info bat_info;
+  get_battery_info(0, &bat_info);
+
   char used[10];
   char total[10];
   char buf[40];
@@ -146,10 +152,27 @@ void create_perf_tab(ui_node *tabs) {
   pie_slice slices[] = {{(int)(info.free / 1000), RGB(152, 237, 109)},
                         {(int)(info.used / 1000), RGB(222, 73, 40)}};
   ui_pie_chart_set_slices(pie, slices, 2);
+
+  sprintf(buf, "State: %d", bat_info.state);
+  ui_label(vstack, buf);
+
+  sprintf(buf, "Remaining: %d", bat_info.remaining);
+  ui_label(vstack, buf);
+
+  sprintf(buf, "Full: %d", bat_info.full_capacity);
+  ui_label(vstack, buf);
+
+  sprintf(buf, "Battery: %d%%",
+          bat_info.full_capacity
+              ? bat_info.remaining / (bat_info.full_capacity / 100)
+              : 0);
+  ui_label(vstack, buf);
 }
 
 int main(void) {
 
+  return 0;
+  /*
   window_handle w = window_open(600, 350, "Navigator");
 
   ui_node *root = ui_create_root();
@@ -182,4 +205,5 @@ int main(void) {
   }
 
   return 0;
+  */
 }

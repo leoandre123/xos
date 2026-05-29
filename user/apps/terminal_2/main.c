@@ -1,8 +1,6 @@
 #include "gfx.h"
 #include "keyboard.h"
 #include "syscall.h"
-#include "window/window.h"
-#include "window_event.h"
 
 #define MAX_ANSI_ARGUMENTS 16
 
@@ -128,7 +126,7 @@ static void term_putc(char c) {
       term_scroll();
   }
 }
-
+/*
 // Copy g_fb content to hw_ptr if it differs, then present.
 static void do_present(window_handle wh, uint *hw_ptr) {
   if (hw_ptr != g_fb.ptr) {
@@ -138,9 +136,12 @@ static void do_present(window_handle wh, uint *hw_ptr) {
   }
   window_present(wh);
 }
+  */
 
 int main(void) {
 
+  return 0;
+  /*
   window_handle wh = window_open(500, 400, "Terminal");
 
   reset_style();
@@ -199,4 +200,5 @@ int main(void) {
       do_present(wh, g_fb.ptr);
     }
   }
+    */
 }

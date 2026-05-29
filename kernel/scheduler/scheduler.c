@@ -44,8 +44,10 @@ static task *scheduler_pick_next(void) {
     return g_task_list;
   }
 
-  if (g_current == g_idle) {
-    // g_idle is not in the task list (next == NULL); scan from the list head
+  if (g_current == g_idle || g_current->state == TASK_DEAD) {
+    // g_idle is not in the task list; a DEAD task has been removed from it.
+    // Either way, scan from the list head since we can't use g_current as
+    // a loop terminator.
     if (!g_task_list)
       return g_idle;
     task *t = g_task_list;

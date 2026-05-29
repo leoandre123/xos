@@ -1,3 +1,5 @@
+#include "dafne/dafne.h"
+#include "dafne/dafne_event.h"
 #include "elf_icon.h"
 #include "fs/file.h"
 #include "gfx.h"
@@ -6,8 +8,6 @@
 #include "string.h"
 #include "syscall.h"
 #include "window/ui/retained_ui.h"
-#include "window/window.h"
-#include "window_event.h"
 
 #define ROW_COUNT 20
 #define MAX_PATH 255
@@ -44,8 +44,9 @@ static void path_pop(void) {
     return;
   if (g_path[len - 1] == '/')
     len--;
-  while (len > 1 && g_path[len - 1] != '/')
+  while (len > 1 && g_path[len] != '/')
     len--;
+
   g_path[len] = '\0';
 }
 
@@ -153,8 +154,15 @@ void on_up_clicked(ui_node *btn) {
 }
 
 int main(void) {
+  sys_write("[NAVIGATOR] Connecting to dafne...\n");
+  if (!dafne_connect()) {
+    sys_write("[NAVIGATOR] Connection failed\n");
+    return 0;
+  }
+  sys_write("[NAVIGATOR] Connected\n");
+  dafne_window_create(600, 350, "Navigator");
 
-  window_handle w = window_open(600, 350, "Navigator");
+  // window_handle w = window_open(600, 350, "Navigator");
 
   g_folder = img_load("/sys/icons/folder.lbm");
   g_file = img_load("/sys/icons/file.lbm");
@@ -204,22 +212,26 @@ int main(void) {
   redraw();
 
   window_event ev;
-  while (window_poll_event(w, &ev)) {
+  window_handle w;
+  while (dafne_wait_event(&ev)) {
     if (ev.type == WET_CREATE) {
       ui_init(ev.create_event.width, ev.create_event.height,
               ev.create_event.pitch);
+      w = ev.create_event.handle;
     } else if (ev.type == WET_PAINT) {
+      // sys_write("EVENT");
       if (!ev.paint_event.paint_handle) {
         sys_write("ERROR FB EMPTY");
         for (;;)
           sys_yield();
       }
       ui_render(ev.paint_event.paint_handle);
-      window_end_paint(w);
+
+      dafne_window_present(w);
     } else {
       ui_update(ev);
     }
   }
-
+  sys_write("[NAVIGATOR] Navigator exited\n");
   return 0;
 }

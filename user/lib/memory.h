@@ -1,7 +1,9 @@
 #pragma once
 #include "cdefs.h"
 
+#include "ipc/channel.h"
 #include "syscall.h"
+#include "syscalls.h"
 #include "types.h"
 
 EXTERN_C_BEGIN
@@ -53,6 +55,16 @@ static void *malloc(ulong size) {
 static void free(void *ptr) {
   malloc_hdr *hdr = (malloc_hdr *)(ptr - sizeof(malloc_hdr));
   sys_free(hdr, hdr->size);
+}
+
+static void *malloc_shared(ulong size, channel_handle ch, void **client_vaddr) {
+  ulong total = size + sizeof(malloc_hdr);
+  void *client;
+  malloc_hdr *hdr =
+      (malloc_hdr *)syscall(SYS_ALLOC_SHARED, size, ch, (ulong)&client);
+  hdr->size = total;
+  *client_vaddr = (client + sizeof(malloc_hdr));
+  return ((void *)hdr) + sizeof(malloc_hdr);
 }
 
 EXTERN_C_END

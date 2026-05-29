@@ -4,22 +4,34 @@
 #define SYS_WRITE         0
 #define SYS_EXIT          1
 #define SYS_WRITE_CONSOLE 2
-#define SYS_READ_KEY      3  // blocks until key; returns (char<<32)|keycode
-#define SYS_EXEC          4  // arg1=path, arg2=stdin_fd, arg3=stdout_fd; returns pid or -1
-#define SYS_WAIT          5  // arg1=pid; blocks until that pid exits
-#define SYS_PIPE          6  // returns (write_fd<<32)|read_fd
-#define SYS_READ_FD       7  // arg1=fd, arg2=buf, arg3=len; returns bytes read
-#define SYS_WRITE_FD      8  // arg1=fd, arg2=buf, arg3=len; returns bytes written
-#define SYS_MAP_FB        9  // arg1=fb_info*; maps framebuffer into task, fills struct
-#define SYS_PIPE_AVAIL    10 // arg1=fd; returns bytes available without blocking
-#define SYS_READ_KEY_NB   11 // non-blocking; returns (char<<32)|code or 0 if no key
-#define SYS_YIELD         12 // yield CPU to scheduler
-#define SYS_READ_MOUSE    14 // non-blocking; returns (1<<48)|(buttons<<32)|(y<<16)|x or 0
-#define SYS_WRITE_HEX     20
+#define SYS_READ_KEY      3 // blocks until key; returns (char<<32)|keycode
+#define SYS_EXEC          4 // arg1=path, arg2=stdin_fd, arg3=stdout_fd; returns pid or -1
+#define SYS_WAIT          5 // arg1=pid; blocks until that pid exits
 
-/* MEMORY 30-40*/
-#define SYS_ALLOC 30 // arg1=size in bytes; maps anon pages, returns user vaddr or 0
-#define SYS_FREE  31
+#define SYS_READ_FD  7 // arg1=fd, arg2=buf, arg3=len; returns bytes read
+#define SYS_WRITE_FD 8 // arg1=fd, arg2=buf, arg3=len; returns bytes written
+#define SYS_MAP_FB   9 // arg1=fb_info*; maps framebuffer into task, fills struct
+
+#define SYS_READ_KEY_NB 11 // non-blocking; returns (char<<32)|code or 0 if no key
+#define SYS_YIELD       12 // yield CPU to scheduler
+#define SYS_READ_MOUSE  14 // non-blocking; returns (1<<48)|(buttons<<32)|(y<<16)|x or 0
+#define SYS_WRITE_HEX   19
+
+/* IPC 20-29*/
+#define SYS_PIPE                 20 // returns (write_fd<<32)|read_fd
+#define SYS_PIPE_AVAIL           21 // arg1=fd; returns bytes available without blocking
+#define SYS_IPC_SERVER           22 // arg1=name, returns srv handle
+#define SYS_IPC_SERVER_ACCEPT    23 // arg1=srv handle, returns pipe handle
+#define SYS_IPC_SERVER_CONNECT   24 // arg1=name, return srv handle
+#define SYS_IPC_SEND             25
+#define SYS_IPC_RECV             26
+#define SYS_IPC_SERVER_ACCEPT_NB 27
+#define SYS_IPC_RECV_NB          28
+
+/* MEMORY 30-39*/
+#define SYS_ALLOC        30 // arg1=size in bytes; maps anon pages, returns user vaddr or 0
+#define SYS_FREE         31
+#define SYS_ALLOC_SHARED 32 // arg1=size, arg2=ch handle, arg3=[OUT]client_vaddr
 
 /* TIME 40- */
 #define SYS_UNIX_TIME        40
@@ -66,12 +78,15 @@
 #define SYS_WM_POLL     121
 
 /* WINDOW 130-139*/
-#define SYS_WINDOW_CREATE      130
-#define SYS_WINDOW_POLL        131
-#define SYS_WINDOW_PRESENT     132
-#define SYS_WINDOW_POST_EVENT  133
-#define SYS_WINDOW_FRAMEBUFFER 134
+// #define SYS_WINDOW_CREATE      130
+// #define SYS_WINDOW_POLL        131
+// #define SYS_WINDOW_PRESENT     132
+// #define SYS_WINDOW_POST_EVENT  133
+// #define SYS_WINDOW_FRAMEBUFFER 134
 
 /* STATS 140-149 */
 #define SYS_STATS_MEMORY 140 // arg1=&mem_info
 #define SYS_STATS_CPU    141 // arg1=&cpu_info
+
+/* POWER 150-159 */
+#define SYS_BATTERY_INFO 150 // arg1=index, arg2=&battery_info; returns 1 if present else 0

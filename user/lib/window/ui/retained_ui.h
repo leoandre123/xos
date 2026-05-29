@@ -1,11 +1,11 @@
 #pragma once
 #include "cdefs.h"
 
+#include "dafne/dafne_event.h"
 #include "fb_info.h"
 #include "image.h"
 #include "keyboard.h"
 #include "types.h"
-#include "window_event.h"
 
 EXTERN_C_BEGIN
 
