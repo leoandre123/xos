@@ -12,6 +12,7 @@ typedef struct {
   pid pids[2];
   pipe *p[2];
   task *listeners[2];
+  bool is_closed[2];
 } channel;
 
 ipc_srv_handle ipc_server(const char *identifier);
@@ -21,3 +22,5 @@ channel_handle ipc_connect(const char *identifier);
 void channel_send(channel_handle h, const void *data, int len);
 int channel_recv(channel_handle h, void *buf, int len);
 bool channel_set_listener(channel_handle h, task *t);
+
+void channel_close(channel *c, pid pid);

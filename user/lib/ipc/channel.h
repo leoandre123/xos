@@ -25,8 +25,15 @@ static inline void channel_send(channel_handle h, const void *data, int len) {
   syscall(SYS_IPC_SEND, h, (ulong)data, len);
 }
 static inline int channel_recv(channel_handle h, void *buf, int len) {
-  return syscall(SYS_IPC_RECV, h, (ulong)buf, len);
+  return (int)syscall(SYS_IPC_RECV, h, (ulong)buf, len);
 }
 static inline int channel_recv_nb(channel_handle h, void *buf, int len) {
-  return syscall(SYS_IPC_RECV_NB, h, (ulong)buf, len);
+  return (int)syscall(SYS_IPC_RECV_NB, h, (ulong)buf, len);
+}
+static inline void channel_close(channel_handle h) {
+  syscall(SYS_IPC_CHANNEL_CLOSE, h, 0, 0);
+}
+
+static inline int ipc_get_pid(channel_handle h) {
+  return syscall(SYS_IPC_PID, h, 0, 0);
 }

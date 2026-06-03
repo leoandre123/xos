@@ -6,8 +6,8 @@ static ui_size ps_vstack(ui_node *node) {
   ushort h = 0;
 
   for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    max_w = MAX(max_w, child->preferred_size.w);
-    h += child->preferred_size.h + node->stack.gap;
+    max_w = MAX(max_w, child->_preferred_size.w);
+    h += child->_preferred_size.h + node->stack.gap;
   }
   if (h > 0)
     h -= node->stack.gap;
@@ -27,7 +27,7 @@ static void layout_vstack(ui_node *node, ui_size size, ui_pos pos) {
     if (c->expand)
       expand_count++;
     else
-      fixed_h += c->preferred_size.h + gap;
+      fixed_h += c->_preferred_size.h + gap;
   }
   if (fixed_h > 0)
     fixed_h -= gap;
@@ -39,20 +39,20 @@ static void layout_vstack(ui_node *node, ui_size size, ui_pos pos) {
 
   ui_pos child_pos = pos;
   for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    ushort ch = child->expand ? expand_h : child->preferred_size.h;
+    ushort ch = child->expand ? expand_h : child->_preferred_size.h;
     ui_size child_size;
     switch (node->stack.align_children) {
     case ALIGN_START:
       child_pos.x = pos.x;
-      child_size = (ui_size){child->preferred_size.w, ch};
+      child_size = (ui_size){child->_preferred_size.w, ch};
       break;
     case ALIGN_END:
-      child_pos.x = pos.x + size.w - child->preferred_size.w;
-      child_size = (ui_size){child->preferred_size.w, ch};
+      child_pos.x = pos.x + size.w - child->_preferred_size.w;
+      child_size = (ui_size){child->_preferred_size.w, ch};
       break;
     case ALIGN_CENTER:
-      child_pos.x = pos.x + (size.w - child->preferred_size.w) / 2;
-      child_size = (ui_size){child->preferred_size.w, ch};
+      child_pos.x = pos.x + (size.w - child->_preferred_size.w) / 2;
+      child_size = (ui_size){child->_preferred_size.w, ch};
       break;
     case ALIGN_STRETCH:
       child_pos.x = pos.x;

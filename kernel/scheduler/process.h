@@ -16,6 +16,7 @@ typedef struct process {
 
   char name[PROCESS_MAX_NAME_LENGTH];
   char working_directory[256];
+  char executable_path[256];
 
   address_space *address_space;
   ulong heap_next;

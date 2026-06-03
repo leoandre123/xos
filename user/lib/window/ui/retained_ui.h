@@ -74,6 +74,7 @@ typedef struct ui_node {
     rect calculated_rect;
   };
   ui_size preferred_size;
+  ui_size _preferred_size;
   struct ui_node *parent;
   struct ui_node *first_child;
   struct ui_node *next_sibling;

@@ -84,6 +84,8 @@ ui_node *create_node(ui_node *parent) {
   node->interactive = false;
   node->first_child = 0;
   node->next_sibling = 0;
+  node->preferred_size.w = 0;
+  node->preferred_size.h = 0;
 
   if (parent->first_child) {
     ui_node *child;
@@ -113,7 +115,11 @@ static void measure_node(ui_node *node) {
     measure_node(child);
   }
 
-  node->preferred_size = node->get_preferred_size(node);
+  ui_size ps = node->get_preferred_size(node);
+  node->_preferred_size.w =
+      node->preferred_size.w ? node->preferred_size.w : ps.w;
+  node->_preferred_size.h =
+      node->preferred_size.h ? node->preferred_size.h : ps.h;
 }
 
 static ui_node *hit_test(ui_node *node, int mx, int my) {

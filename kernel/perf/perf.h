@@ -84,6 +84,8 @@ static inline void _perf_guard_exit(_perf_guard_t *g) {
 
 extern perf_counter g_perf_user_time;
 extern perf_counter g_perf_kernel_time;
+extern ulong g_idle_time;
+extern ulong g_idle_start;
 
 // Charge [tsc - t->perf_last_tsc] to the appropriate counter, then reset.
 #define _PERF_CHARGE(t, ctr)                           \
@@ -127,10 +129,14 @@ extern perf_counter g_perf_kernel_time;
   } while (0)
 
 // Call immediately after context_switch returns to start the resumed task's clock.
-#define PERF_MODE_RESUME(t) do { \
-    if (t) (t)->perf_last_tsc = _rdtsc(); \
-} while (0)
+#define PERF_MODE_RESUME(t)          \
+  do {                               \
+    if (t)                           \
+      (t)->perf_last_tsc = _rdtsc(); \
+  } while (0)
 
+#define PERF_ENTER_IDLE() g_idle_start = _rdtsc()
+#define PERF_EXIT_IDLE()  g_idle_time += (_rdtsc() - g_idle_start)
 // PERF_MODE_SYSCALL_SCOPE(t)
 // Drop this at the top of syscall_dispatch (after getting the current task).
 // Charges elapsed time as user on entry, then automatically charges kernel
@@ -213,5 +219,7 @@ static inline void _perf_irq_guard_exit(_perf_irq_guard_t *g) {
 #define PERF_MODE_RESUME(t)          ((void)(t))
 #define PERF_MODE_SYSCALL_SCOPE(t)   ((void)(t))
 #define PERF_IRQ_SCOPE(t)            ((void)(t))
+#define PERF_ENTER_IDLE()            ((void)0)
+#define PERF_EXIT_IDLE()             ((void)0)
 
 #endif // KERNEL_PERF

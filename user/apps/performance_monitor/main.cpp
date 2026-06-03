@@ -1,5 +1,7 @@
 #include "battery_info.h"
 #include "cpu_info.h"
+#include "dafne/dafne.h"
+#include "dafne/dafne_event.h"
 #include "gfx.h"
 #include "mem_info.h"
 #include "process_info.h"
@@ -170,10 +172,12 @@ void create_perf_tab(ui_node *tabs) {
 }
 
 int main(void) {
-
-  return 0;
-  /*
-  window_handle w = window_open(600, 350, "Navigator");
+  sys_write("[PerfMon] Connecting to dafne...\n");
+  if (!dafne_connect()) {
+    sys_write("[PerfMon] Connection failed\n");
+    return 0;
+  }
+  dafne_window_create(600, 350, "PerfMon", "");
 
   ui_node *root = ui_create_root();
   root->bg_color = RGB(232, 230, 228);
@@ -187,10 +191,12 @@ int main(void) {
   redraw();
 
   window_event ev;
-  while (window_poll_event(w, &ev)) {
+  window_handle w;
+  while (dafne_wait_event(&ev)) {
     if (ev.type == WET_CREATE) {
       ui_init(ev.create_event.width, ev.create_event.height,
               ev.create_event.pitch);
+      w = ev.create_event.handle;
     } else if (ev.type == WET_PAINT) {
       if (!ev.paint_event.paint_handle) {
         sys_write("ERROR FB EMPTY");
@@ -198,12 +204,11 @@ int main(void) {
           sys_yield();
       }
       ui_render(ev.paint_event.paint_handle);
-      window_end_paint(w);
+      dafne_window_present(w);
     } else {
       ui_update(ev);
     }
   }
 
   return 0;
-  */
 }

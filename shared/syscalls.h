@@ -15,18 +15,6 @@
 #define SYS_READ_KEY_NB 11 // non-blocking; returns (char<<32)|code or 0 if no key
 #define SYS_YIELD       12 // yield CPU to scheduler
 #define SYS_READ_MOUSE  14 // non-blocking; returns (1<<48)|(buttons<<32)|(y<<16)|x or 0
-#define SYS_WRITE_HEX   19
-
-/* IPC 20-29*/
-#define SYS_PIPE                 20 // returns (write_fd<<32)|read_fd
-#define SYS_PIPE_AVAIL           21 // arg1=fd; returns bytes available without blocking
-#define SYS_IPC_SERVER           22 // arg1=name, returns srv handle
-#define SYS_IPC_SERVER_ACCEPT    23 // arg1=srv handle, returns pipe handle
-#define SYS_IPC_SERVER_CONNECT   24 // arg1=name, return srv handle
-#define SYS_IPC_SEND             25
-#define SYS_IPC_RECV             26
-#define SYS_IPC_SERVER_ACCEPT_NB 27
-#define SYS_IPC_RECV_NB          28
 
 /* MEMORY 30-39*/
 #define SYS_ALLOC        30 // arg1=size in bytes; maps anon pages, returns user vaddr or 0
@@ -41,6 +29,7 @@
 /* PROCESSES 60-69 */
 #define SYS_PROCESS_EXEC 60
 #define SYS_PROCESS_LIST 61 // arg1=buf, arg2=max_count
+#define SYS_PROCESS_PATH 62 // arg1=pid, self if 0, arg2 buf, arg3 len
 
 /* THREADING 70-79 */
 #define SYS_THREAD      70 // arg1=entry, returns handle
@@ -73,20 +62,23 @@
 #define SYS_NET_CONF_NIC 113 // arg1=nic_id, arg2=field, arg3=value
 #define SYS_NET_ROUTES   114 // arg1=route_info*, arg2=len
 
-/* WINDOW MANAGER 120-129 */
-#define SYS_WM_REGISTER 120
-#define SYS_WM_POLL     121
-
-/* WINDOW 130-139*/
-// #define SYS_WINDOW_CREATE      130
-// #define SYS_WINDOW_POLL        131
-// #define SYS_WINDOW_PRESENT     132
-// #define SYS_WINDOW_POST_EVENT  133
-// #define SYS_WINDOW_FRAMEBUFFER 134
+/* IPC 120-139 */
+#define SYS_PIPE                 120 // returns (write_fd<<32)|read_fd
+#define SYS_PIPE_AVAIL           121 // arg1=fd; returns bytes available without blocking
+#define SYS_IPC_SERVER           122 // arg1=name, returns srv handle
+#define SYS_IPC_SERVER_ACCEPT    123 // arg1=srv handle, returns pipe handle
+#define SYS_IPC_SERVER_CONNECT   124 // arg1=name, return srv handle
+#define SYS_IPC_SEND             125
+#define SYS_IPC_RECV             126
+#define SYS_IPC_SERVER_ACCEPT_NB 127
+#define SYS_IPC_RECV_NB          128
+#define SYS_IPC_CHANNEL_CLOSE    129
+#define SYS_IPC_PID              130
 
 /* STATS 140-149 */
 #define SYS_STATS_MEMORY 140 // arg1=&mem_info
 #define SYS_STATS_CPU    141 // arg1=&cpu_info
+#define SYS_INFO         142 // arg1=type, arg2=struct_ptr
 
 /* POWER 150-159 */
 #define SYS_BATTERY_INFO 150 // arg1=index, arg2=&battery_info; returns 1 if present else 0

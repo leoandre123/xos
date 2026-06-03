@@ -9,8 +9,8 @@
 #include "syscall.h"
 #include "window/ui/retained_ui.h"
 
-#define ROW_COUNT 20
-#define MAX_PATH 255
+#define ROW_COUNT   20
+#define MAX_PATH    255
 #define MAX_ENTRIES 100
 
 static bitmap *g_folder;
@@ -136,7 +136,7 @@ static void redraw() {
   }
 }
 
-void on_dir_clicked(ui_node *grid, int row) {
+void on_dir_clicked(ui_node *_, int row) {
   if (row == 0)
     return;
   int idx = g_page * ROW_COUNT + row - 1;
@@ -147,7 +147,7 @@ void on_dir_clicked(ui_node *grid, int row) {
   }
 }
 
-void on_up_clicked(ui_node *btn) {
+void on_up_clicked(ui_node *_) {
   path_pop();
   refresh_list();
   redraw();
@@ -160,7 +160,7 @@ int main(void) {
     return 0;
   }
   sys_write("[NAVIGATOR] Connected\n");
-  dafne_window_create(600, 350, "Navigator");
+  dafne_window_create(600, 350, "Navigator", 0);
 
   // window_handle w = window_open(600, 350, "Navigator");
 
@@ -174,9 +174,9 @@ int main(void) {
   // ui_set_debug_dirty(true);
   ui_node *vstack = ui_vstack(root, 8, ALIGN_STRETCH);
   ui_node *toolbar = ui_hstack(vstack, 8, ALIGN_CENTER);
-  ui_node *btn0 = rui_button(toolbar, "btn0");
-  ui_node *btn1 = rui_button(toolbar, "Button 1");
-  ui_node *btn2 = rui_button(toolbar, "LONG Button 2");
+  rui_button(toolbar, "btn0");
+  rui_button(toolbar, "Button 1");
+  rui_button(toolbar, "LONG Button 2");
 
   ui_node *path_bar = ui_grid(vstack, 3, 1, 8);
   ui_grid_set_col_sizing(path_bar, GRID_SIZING_EXPAND, GRID_SIZING_EXPAND,
@@ -214,12 +214,15 @@ int main(void) {
   window_event ev;
   window_handle w;
   while (dafne_wait_event(&ev)) {
-    if (ev.type == WET_CREATE) {
+    switch (ev.type) {
+
+    case WET_CREATE:
       ui_init(ev.create_event.width, ev.create_event.height,
               ev.create_event.pitch);
       w = ev.create_event.handle;
-    } else if (ev.type == WET_PAINT) {
-      // sys_write("EVENT");
+      break;
+    case WET_CLOSE: return 0; break;
+    case WET_PAINT:
       if (!ev.paint_event.paint_handle) {
         sys_write("ERROR FB EMPTY");
         for (;;)
@@ -228,8 +231,12 @@ int main(void) {
       ui_render(ev.paint_event.paint_handle);
 
       dafne_window_present(w);
-    } else {
-      ui_update(ev);
+      break;
+
+    case WET_KEY_DOWN:
+    case WET_KEY_UP:
+    case WET_MOUSE: ui_update(ev); break;
+    default: break;
     }
   }
   sys_write("[NAVIGATOR] Navigator exited\n");

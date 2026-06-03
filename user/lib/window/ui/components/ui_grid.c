@@ -17,8 +17,8 @@ static ui_size ps_grid(ui_node *node) {
        child = child->next_sibling, i++) {
     int col = i % cols;
     int row = i / cols;
-    col_widths[col] = MAX(col_widths[col], child->preferred_size.w);
-    row_heights[row] = MAX(row_heights[row], child->preferred_size.h);
+    col_widths[col] = MAX(col_widths[col], child->_preferred_size.w);
+    row_heights[row] = MAX(row_heights[row], child->_preferred_size.h);
   }
 
   int rows = (i + cols - 1) / cols;
@@ -48,9 +48,9 @@ static void layout_grid(ui_node *node, ui_size size, ui_pos pos) {
        child = child->next_sibling, i++) {
     int col = i % cols, row = i / cols;
     if (node->grid.col_sizing[col] == GRID_SIZING_FIT_CONTENT)
-      fit_w[col] = MAX(fit_w[col], child->preferred_size.w);
+      fit_w[col] = MAX(fit_w[col], child->_preferred_size.w);
     node->grid.row_heights[row] =
-        MAX(node->grid.row_heights[row], child->preferred_size.h);
+        MAX(node->grid.row_heights[row], child->_preferred_size.h);
   }
   for (int c = 0; c < cols; c++)
     if (node->grid.col_sizing[c] == GRID_SIZING_FIT_CONTENT)

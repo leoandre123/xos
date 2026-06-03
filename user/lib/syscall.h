@@ -6,6 +6,7 @@
 #include "mouse.h"
 #include "syscalls.h"
 #include "types.h"
+#include <stdio.h>
 
 EXTERN_C_BEGIN
 
@@ -32,9 +33,6 @@ static inline ulong syscall5(ulong num, ulong a1, ulong a2, ulong a3, ulong a4,
 
 static inline void sys_write(const char *s) {
   syscall(SYS_WRITE, (ulong)s, 0, 0);
-}
-static inline void sys_write_hex(ulong value) {
-  syscall(SYS_WRITE_HEX, value, 0, 0);
 }
 static inline void sys_exit(int exit_code) {
   syscall(SYS_EXIT, (ulong)exit_code, 0, 0);

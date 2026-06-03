@@ -6,8 +6,8 @@ static ui_size ps_hstack(ui_node *node) {
   ushort w = 0;
 
   for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    max_h = MAX(max_h, child->preferred_size.h);
-    w += child->preferred_size.w + node->stack.gap;
+    max_h = MAX(max_h, child->_preferred_size.h);
+    w += child->_preferred_size.w + node->stack.gap;
   }
   if (w > 0)
     w -= node->stack.gap;
@@ -24,30 +24,35 @@ static void layout_hstack(ui_node *node, ui_size size, ui_pos pos) {
   // compute space left for expand children
   int fixed_w = 0, expand_count = 0;
   for (ui_node *c = node->first_child; c; c = c->next_sibling) {
-    if (c->expand) expand_count++;
-    else fixed_w += c->preferred_size.w + gap;
+    if (c->expand)
+      expand_count++;
+    else
+      fixed_w += c->_preferred_size.w + gap;
   }
-  if (fixed_w > 0) fixed_w -= gap;
-  ushort expand_w = expand_count > 0
-    ? (ushort)((size.w - fixed_w - gap * (expand_count - 1)) / expand_count)
-    : 0;
+  if (fixed_w > 0)
+    fixed_w -= gap;
+  ushort expand_w =
+      expand_count > 0
+          ? (ushort)((size.w - fixed_w - gap * (expand_count - 1)) /
+                     expand_count)
+          : 0;
 
   ui_pos child_pos = pos;
   for (ui_node *child = node->first_child; child; child = child->next_sibling) {
-    ushort cw = child->expand ? expand_w : child->preferred_size.w;
+    ushort cw = child->expand ? expand_w : child->_preferred_size.w;
     ui_size child_size;
     switch (node->stack.align_children) {
     case ALIGN_START:
       child_pos.y = pos.y;
-      child_size = (ui_size){cw, child->preferred_size.h};
+      child_size = (ui_size){cw, child->_preferred_size.h};
       break;
     case ALIGN_END:
-      child_pos.y = pos.y + size.h - child->preferred_size.h;
-      child_size = (ui_size){cw, child->preferred_size.h};
+      child_pos.y = pos.y + size.h - child->_preferred_size.h;
+      child_size = (ui_size){cw, child->_preferred_size.h};
       break;
     case ALIGN_CENTER:
-      child_pos.y = pos.y + (size.h - child->preferred_size.h) / 2;
-      child_size = (ui_size){cw, child->preferred_size.h};
+      child_pos.y = pos.y + (size.h - child->_preferred_size.h) / 2;
+      child_size = (ui_size){cw, child->_preferred_size.h};
       break;
     case ALIGN_STRETCH:
       child_pos.y = pos.y;

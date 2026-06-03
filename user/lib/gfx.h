@@ -10,11 +10,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#define RGB(r, g, b) ((0xffu << 24u) | (r << 16u) | (g << 8u) | (b))
+#define RGB(r, g, b)     ((0xffu << 24u) | (r << 16u) | (g << 8u) | (b))
 #define ARGB(a, r, g, b) ((a << 24u) | (r << 16u) | (g << 8u) | (b))
-#define RED(col) ((col >> 16) & 0xFF)
-#define GREEN(col) ((col >> 8) & 0xFF)
-#define BLUE(col) ((col) & 0xFF)
+#define RED(col)         ((col >> 16) & 0xFF)
+#define GREEN(col)       ((col >> 8) & 0xFF)
+#define BLUE(col)        ((col) & 0xFF)
 
 extern rect g_clip_rect;
 
@@ -163,9 +163,9 @@ static inline void gfx_rect_gradient(fb_info *fb, int x, int y, uint w, uint h,
       // uint color = color1 + color2;
 
       float t = ((float)dx - x) / w;
-      int r = LERP(RED(color1), RED(color2), t);
-      int g = LERP(GREEN(color1), GREEN(color2), t);
-      int b = LERP(BLUE(color1), BLUE(color2), t);
+      int r = (int)LERP((float)RED(color1), (float)RED(color2), t);
+      int g = (int)LERP((float)GREEN(color1), (float)GREEN(color2), t);
+      int b = (int)LERP((float)BLUE(color1), (float)BLUE(color2), t);
 
       uint color = RGB(r, g, b);
       uint src_a = (color >> 24) & 0xFF;
@@ -270,7 +270,6 @@ static inline void gfx_strf(fb_info *fb, uint x, uint y, uint fg,
 // Allocate an off-screen pixel buffer. Draw into it with any gfx_* function,
 // then flush it to the real framebuffer with gfx_flush.
 static inline fb_info gfx_create_surface(uint w, uint h) {
-  sys_write("1\n");
   fb_info fb;
   fb.ptr = (uint *)sys_alloc((ulong)w * h * 4);
 
@@ -279,17 +278,13 @@ static inline fb_info gfx_create_surface(uint w, uint h) {
     for (;;)
       __asm__("hlt");
   }
-  sys_write("2\n");
   fb.width = w;
   fb.height = h;
   fb.pitch = w * 4;
   fb.dirty_region.w = 0;
-  sys_write("3\n");
-  sys_write_hex((ulong)fb.ptr);
   uint total = w * h;
   for (uint i = 0; i < total; i++)
     fb.ptr[i] = 0;
-  sys_write("4\n");
   return fb;
 }
 
@@ -492,14 +487,24 @@ static inline void gfx_blit_region_rounded4(fb_info *dst, int dx, int dy,
         d_row >= g_clip_rect.y + (int)g_clip_rect.h)
       continue;
 
-    for (int col = icol0; col < icol1; col++) {
-      int d_col = dx + col;
-      if (d_col < 0 || (uint)d_col >= dst->width || d_col < g_clip_rect.x ||
-          d_col >= g_clip_rect.x + (int)g_clip_rect.w)
-        continue;
-      dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col] =
-          src->ptr[(uint)fy * src_pitch_px + (uint)sx + (uint)col];
-    }
+    int d_col0 = dx + icol0;
+    int d_col1 = dx + icol1;
+    int clip_r = g_clip_rect.x + (int)g_clip_rect.w;
+    if (d_col0 < g_clip_rect.x)
+      d_col0 = g_clip_rect.x;
+    if (d_col1 > clip_r)
+      d_col1 = clip_r;
+    if (d_col0 < 0)
+      d_col0 = 0;
+    if (d_col1 > (int)dst->width)
+      d_col1 = (int)dst->width;
+    if (d_col0 >= d_col1)
+      continue;
+
+    uint src_col = (uint)((int)sx + (d_col0 - dx));
+    uint span = (uint)(d_col1 - d_col0);
+    memcpy(&dst->ptr[(uint)d_row * dst_pitch_px + (uint)d_col0],
+           &src->ptr[(uint)fy * src_pitch_px + src_col], span * 4);
   }
 }
 
@@ -574,6 +579,16 @@ static inline void gfx_img(fb_info *fb, uint x, uint y, bitmap *img) {
   for (uint yy = y; yy < y + img->height; yy++) {
     for (uint xx = x; xx < x + img->width; xx++) {
       gfx_pixel_blend(fb, xx, yy, img->data[(yy - y) * img->width + (xx - x)]);
+    }
+  }
+}
+static inline void gfx_imgs(fb_info *fb, uint x, uint y, uint w, uint h,
+                            bitmap *img) {
+  for (uint yy = y; yy < y + h; yy++) {
+    for (uint xx = x; xx < x + w; xx++) {
+      int px = (int)(((float)(xx - x)) / w * img->width);
+      int py = (int)(((float)(yy - y)) / h * img->height);
+      gfx_pixel_blend(fb, xx, yy, img->data[py * img->width + px]);
     }
   }
 }

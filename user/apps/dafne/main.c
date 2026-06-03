@@ -8,8 +8,8 @@
 
 #define IS_ALPHA(c) (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
 
-#define BG 0x00C4D6B0
-#define TB 0x00381D2A
+#define BG      0x00C4D6B0
+#define TB      0x00381D2A
 #define TERM_BG 0x003E363F
 #define TERM_FG 0x00DD403A
 
@@ -28,10 +28,6 @@ int main(void) {
   sys_write("inniting compositor\n");
   compositor_init();
 
-  gfx_fill(&g_desktop, BG);
-  gfx_rect_gradient(&g_desktop, 0, 0, g_desktop.width, g_desktop.height,
-                    RGB(42, 123, 155), RGB(87, 199, 133), 0);
-  gfx_rect(&g_desktop, 0, g_desktop.height - 50, g_desktop.width, 50, TB);
   // memset8((ubyte *)&g_windows, 0, sizeof(g_windows));
 
   sys_write("running navigator\n");
@@ -42,12 +38,22 @@ int main(void) {
   // sys_read_mouse(&g_mouse);
 
   sys_write("running loop");
+  int target_fps = 125;
+  int ms_per_frame = 1000 / target_fps;
+  ulong last_frame = sys_unix_time_millis();
   while (1) {
     compositor_update_desktop();
     compositor_handle_events();
     compositor_handle_input();
     compositor_run();
-    sleep(50);
-    // sys_yield();
+
+    ulong now = sys_unix_time_millis();
+    ulong deadline = last_frame + ms_per_frame;
+    if (now < deadline) {
+      sleep(deadline - now);
+    } else {
+      sys_yield();
+    }
+    last_frame = now;
   }
 }

@@ -140,6 +140,8 @@ channel_handle ipc_connect(const char *identifier) {
   ch->p[1] = pipe_create();
   ch->listeners[0] = 0;
   ch->listeners[1] = 0;
+  ch->is_closed[0] = 0;
+  ch->is_closed[1] = 0;
 
   enqueue_incomming(s, ch);
   if (s->listener) {
@@ -184,8 +186,12 @@ int channel_recv(channel_handle h, void *buf, int len) {
     return 0;
 
   if (ch->pids[0] == p->pid) {
+    if (ch->is_closed[1])
+      return -1;
     return pipe_read(ch->p[1], buf, len);
   } else if (ch->pids[1] == p->pid) {
+    if (ch->is_closed[0])
+      return -1;
     return pipe_read(ch->p[0], buf, len);
   } else {
     klogf(LOG_WARNING, "Unauthorized usage");
@@ -213,4 +219,22 @@ bool channel_set_listener(channel_handle h, task *t) {
     return true;
   }
   return false;
+}
+
+void channel_close(channel *ch, pid pid) {
+  if (ch->pids[0] == pid) {
+    ch->is_closed[0] = true;
+    if (ch->listeners[1]) {
+      task_set_ready(ch->listeners[1]);
+      ch->listeners[1] = 0;
+    }
+  } else if (ch->pids[1] == pid) {
+    ch->is_closed[1] = true;
+    if (ch->listeners[0]) {
+      task_set_ready(ch->listeners[0]);
+      ch->listeners[0] = 0;
+    }
+  } else {
+    klogf(LOG_WARNING, "Unauthorized usage");
+  }
 }

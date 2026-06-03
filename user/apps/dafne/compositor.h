@@ -1,7 +1,14 @@
 #pragma once
 #include "window.h"
 
-#define STATUS_BAR_HEIGHT 50
+#define STATUS_BAR_HEIGHT      20
+#define STATUS_BAR_TEXT_HEIGHT FONT_GLYPH_HEIGHT
+
+#define APP_BAR_WIDTH       70
+#define APP_BAR_ICON_SIZE   40
+#define APP_BAR_ICON_GAP    10
+#define APP_BAR_ICON_RADIUS 10
+#define APP_BAR_ICON_MARGIN ((APP_BAR_WIDTH - APP_BAR_ICON_SIZE) / 2)
 
 extern fb_info g_desktop;
 extern fb_info g_screen;

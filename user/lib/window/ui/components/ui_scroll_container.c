@@ -14,7 +14,7 @@ static void layout(ui_node *node, ui_size size, ui_pos pos) {
   node->calculated_pos = pos;
 
   if (node->first_child) {
-    ui_size pref_size = node->first_child->preferred_size;
+    ui_size pref_size = node->first_child->_preferred_size;
     ui_pos child_pos = (ui_pos){pos.x - node->scroll_container.scroll_x,
                                 pos.y - node->scroll_container.scroll_y};
     switch (node->scroll_container.direction) {

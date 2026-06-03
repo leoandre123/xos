@@ -19,34 +19,34 @@ extern void context_switch(ulong *old_rsp, ulong new_rsp);
 
 int g_scheduler_running = 0;
 
-static task *g_current = 0;
+task *g_current_task = 0;
 static task *g_task_list = 0;
 static task *g_idle = 0;
 static uint s_next_id = 1;
 
 static NORETURN task_bootstrap() {
   __asm__ volatile("sti");
-  g_current->entry(g_current->args);
+  g_current_task->entry(g_current_task->args);
   task_exit();
   panic("task_bootstrap returned");
 }
 
 static NORETURN user_task_bootstrap() {
-  serial_printf("user_task_bootstrap: task='%s' entry=%x\n", g_current->owner->name, (ulong)g_current->entry);
-  gdt_set_kernel_stack((ulong)g_current->stack_base + g_current->stack_size);
-  jump_to_userspace((ulong)g_current->entry, (ulong)g_current->user_rsp,
-                    g_current->start_argc, g_current->start_argv);
+  serial_printf("user_task_bootstrap: task='%s' entry=%x\n", g_current_task->owner->name, (ulong)g_current_task->entry);
+  gdt_set_kernel_stack((ulong)g_current_task->stack_base + g_current_task->stack_size);
+  jump_to_userspace((ulong)g_current_task->entry, (ulong)g_current_task->user_rsp,
+                    g_current_task->start_argc, g_current_task->start_argv);
   panic("jump_to_userspace returned");
 }
 
 static task *scheduler_pick_next(void) {
-  if (!g_current) {
+  if (!g_current_task) {
     return g_task_list;
   }
 
-  if (g_current == g_idle || g_current->state == TASK_DEAD) {
+  if (g_current_task == g_idle || g_current_task->state == TASK_DEAD) {
     // g_idle is not in the task list; a DEAD task has been removed from it.
-    // Either way, scan from the list head since we can't use g_current as
+    // Either way, scan from the list head since we can't use g_current_task as
     // a loop terminator.
     if (!g_task_list)
       return g_idle;
@@ -59,10 +59,10 @@ static task *scheduler_pick_next(void) {
     return g_idle;
   }
 
-  task *t = g_current->next;
+  task *t = g_current_task->next;
 
   // Loop over the next tasks after the current one until a ready one is found or we are back where we started
-  while (t != g_current) {
+  while (t != g_current_task) {
     if (t->state == TASK_READY) {
       return t;
     }
@@ -70,8 +70,8 @@ static task *scheduler_pick_next(void) {
   }
 
   // If we get here, no other task is ready. Thus we check if the current one is, otherwise idle
-  if (g_current->state == TASK_READY || g_current->state == TASK_RUNNING) {
-    return g_current;
+  if (g_current_task->state == TASK_READY || g_current_task->state == TASK_RUNNING) {
+    return g_current_task;
   }
 
   return g_idle;
@@ -127,7 +127,7 @@ void schedule() {
   PERF_BEGIN("schedule");
 
   task *next = scheduler_pick_next();
-  task *prev = g_current;
+  task *prev = g_current_task;
   if (!next || next == prev) {
     PERF_END();
     return;
@@ -136,10 +136,15 @@ void schedule() {
   if (prev && prev->state == TASK_RUNNING)
     prev->state = TASK_READY;
 
-  g_current = next;
-  g_current->state = TASK_RUNNING;
+  g_current_task = next;
+  g_current_task->state = TASK_RUNNING;
 
   PERF_MODE_SWITCH(prev, next);
+  if (next == g_idle) {
+    PERF_ENTER_IDLE();
+  } else if (prev == g_idle) {
+    PERF_EXIT_IDLE();
+  }
 
   __asm__ volatile("cli");
 
@@ -161,7 +166,7 @@ void schedule() {
     context_switch(&dummy, (ulong)next->kernel_rsp);
   }
 
-  PERF_MODE_RESUME(g_current);
+  PERF_MODE_RESUME(g_current_task);
 
   __asm__ volatile("sti");
 }
@@ -216,10 +221,8 @@ NORETURN scheduler_run() {
   panic("schedule_run has returned");
 }
 
-task *scheduler_current(void) { return g_current; }
-
 NORETURN task_exit(void) {
-  task_kill(g_current);
+  task_kill(g_current_task);
 
   schedule();
   panic("task_exit returned");

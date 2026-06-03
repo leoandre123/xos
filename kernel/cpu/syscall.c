@@ -11,6 +11,7 @@
 #include "io/time.h"
 #include "io/timer.h"
 #include "ipc/channel.h"
+#include "ipc/handle.h"
 #include "ipc/pipe.h"
 #include "keys.h"
 #include "mem_info.h"
@@ -29,9 +30,12 @@
 #include "scheduler/process_manager.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/task.h"
+#include "sys_info.h"
 #include "syscalls.h"
 #include "thread.h"
 #include "types.h"
+#include "utils/string.h"
+#include "version.h"
 
 // Framebuffer globals defined in kernel.c
 extern uint g_fb_width;
@@ -125,11 +129,6 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return 0;
   }
 
-  case SYS_WRITE_HEX: {
-    PERF_SCOPE("SYS_WRITE_HEX");
-    serial_write_hex(arg1);
-    return 0;
-  }
   case SYS_EXIT:
     process_exit(arg1);
     return 0;
@@ -355,9 +354,24 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
     return process_exec((const char *)arg1, (int)arg2, (int)arg3, (int)arg4, (const char **)arg5);
   }
   case SYS_PROCESS_LIST: {
-    PERF_SCOPE("SYS_PROCESS_LISY");
+    PERF_SCOPE("SYS_PROCESS_LIST");
     return process_list((process_info *)arg1, arg2);
   }
+  case SYS_PROCESS_PATH: {
+    PERF_SCOPE("SYS_PROCESS_PATH");
+    process *p;
+    if (arg1) {
+      p = find_process((pid)arg1);
+    } else {
+      p = scheduler_current()->owner;
+    }
+    if (!p)
+      return -1;
+    // TODO: Use length aware copy
+    strcpy((char *)arg2, p->executable_path);
+    return 0;
+  }
+
 #pragma region threads
 
   case SYS_THREAD: {
@@ -576,6 +590,39 @@ ulong syscall_dispatch(ulong num, ulong arg1, ulong arg2, ulong arg3, ulong arg4
   case SYS_IPC_RECV_NB: {
     PERF_SCOPE("SYS_IPC_RECV_NB");
     return channel_recv(arg1, (void *)arg2, arg3);
+  }
+  case SYS_IPC_CHANNEL_CLOSE: {
+    PERF_SCOPE("SYS_IPC_CHANNEL_CLOSE");
+    process *p = scheduler_current()->owner;
+    handle_entry *h = handle_get(p, arg1);
+    if (h)
+      channel_close(h->ptr, p->pid);
+    return 0;
+  }
+  case SYS_IPC_PID: {
+    PERF_SCOPE("SYS_IPC_PID");
+    process *p = scheduler_current()->owner;
+    handle_entry *h = handle_get(p, arg1);
+    if (h) {
+      channel *ch = h->ptr;
+      if (p->pid == ch->pids[0])
+        return ch->pids[1];
+      if (p->pid == ch->pids[1])
+        return ch->pids[0];
+    }
+    return -1;
+  }
+  case SYS_INFO: {
+    switch ((sys_info_type)arg1) {
+    case SYSINFO_KERNEL:
+      strcpy(((kernel_info *)arg2)->name, KERNEL_NAME);
+      strcpy(((kernel_info *)arg2)->version, KERNEL_VERSION);
+      break;
+    case SYSINFO_MEMORY: break;
+    case SYSINFO_CPU: break;
+    case SYSINFO_PROCESS: break;
+    }
+    return 0;
   }
 
   default:

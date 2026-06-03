@@ -1,6 +1,7 @@
 #pragma once
 #include "memory/vmm.h"
 #include "noreturn.h"
+#include "scheduler/process.h"
 #include "task.h"
 
 #define USER_STACK_TOP   0x0000800000000000ULL // top of user virtual address space
@@ -8,10 +9,12 @@
 #define USER_HEAP_BASE   0x0000500000000000ULL // base of user heap (grows up)
 
 extern int g_scheduler_running;
+extern task *g_current_task;
 
 void scheduler_init();
 void scheduler_add(task *task);
-task *scheduler_current(void);
+static inline task *scheduler_current(void) { return g_current_task; }
+static inline process *process_current(void) { return g_current_task->owner; }
 NORETURN scheduler_run();
 void schedule();
 task *scheduler_find(uint id);

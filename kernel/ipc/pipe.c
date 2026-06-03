@@ -59,3 +59,6 @@ bool pipe_add_listener(pipe *p, task *t) {
   p->listener = t;
   return true;
 }
+
+void pipe_close_write(pipe *p) {}
+void pipe_close_read(pipe *p) {}

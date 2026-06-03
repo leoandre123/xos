@@ -21,3 +21,6 @@ void pipe_write(pipe *p, const ubyte *data, uint len);
 uint pipe_read(pipe *p, ubyte *data, uint max_len);
 uint pipe_available(pipe *p);
 bool pipe_add_listener(pipe *p, task *t);
+
+void pipe_close_write(pipe *p);
+void pipe_close_read(pipe *p);

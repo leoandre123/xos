@@ -19,12 +19,12 @@ static disk *allocate_disk() {
   }
   return 0;
 }
-static disk *free_disk(disk *disk) {
+static void free_disk(disk *disk) {
   int idx = disk - g_disks;
   if (idx >= 0 && idx < FILESYSTEM_MAX_DISKS) {
+    disk->id = 0;
     g_disk_used[idx] = false;
   }
-  return 0;
 }
 
 void on_ide_found(ubyte bus, ubyte dev, ubyte func) {

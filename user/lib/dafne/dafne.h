@@ -13,7 +13,9 @@ typedef struct {
 
 // Create connection with dafne
 bool dafne_connect();
-void dafne_window_create(ushort width, ushort height, const char *title);
+void dafne_window_create(ushort width, ushort height, const char *title,
+                         const char *icon_path);
+void dafne_window_destroy(window_handle h);
 bool dafne_wait_event(window_event *ev);
 void dafne_window_present(window_handle h);
 

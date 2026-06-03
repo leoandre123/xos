@@ -23,25 +23,6 @@ static pid s_next_pid = 1;
 static process *s_processes = {0};
 static process *s_last_process = {0};
 
-// static int handle_alloc(process *p, handle_type type, void *ptr) {
-//   for (int i = 0; i < MAX_HANDLES; i++) {
-//     if (p->handles[i].type == HANDLE_NONE) {
-//       p->handles[i].type = type;
-//       p->handles[i].ptr = ptr;
-//       return i;
-//     }
-//   }
-//   return -1;
-// }
-//
-// static handle_entry *handle_get(process *p, int fd) {
-//   if (fd < 0 || fd >= MAX_HANDLES)
-//     return 0;
-//   if (p->handles[fd].type == HANDLE_NONE)
-//     return 0;
-//   return &p->handles[fd];
-// }
-
 static process *create_process() {
   process *p = kmalloc(sizeof(process));
   if (!p)
@@ -148,6 +129,7 @@ pid process_exec(const char *path, int std_in, int std_out, int argc, const char
   strcpy(p->working_directory, path);
   path_dirname(path, p->working_directory, sizeof(p->working_directory));
   strcpy(p->name, path_filename(path));
+  strcpy(p->executable_path, path);
 
   if (parent) {
     p->next_sibling = parent->first_child;
@@ -261,6 +243,8 @@ void process_kill(process *p) {
     }
     t = next;
   }
+
+  handle_close_all(p);
 
   if (p->waiting_task) {
     task_set_ready(p->waiting_task);

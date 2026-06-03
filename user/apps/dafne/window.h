@@ -1,10 +1,11 @@
 #pragma once
 #include "dafne/dafne_event.h"
 #include "fb_info.h"
+#include "image.h"
 
 #define WINDOW_TITLE_BAR_HEIGHT 35
-#define WINDOW_BUTTON_WIDTH 45
-#define WINDOW_BORDER_RADIUS 7
+#define WINDOW_BUTTON_WIDTH     45
+#define WINDOW_BORDER_RADIUS    7
 
 #define WINDOW_MAX_COUNT 10
 
@@ -31,6 +32,7 @@ typedef struct window {
   int prev_x;
   int prev_y;
   char title[32];
+  bitmap *icon;
   struct client *client;
 
   struct window *prev;

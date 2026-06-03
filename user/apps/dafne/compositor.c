@@ -1,17 +1,22 @@
 #include "compositor.h"
 #include "dafne/dafne_comp_event.h"
 #include "dafne/dafne_event.h"
+#include "elf_icon.h"
 #include "fb_info.h"
 #include "font.h"
 #include "gfx.h"
 #include "handles.h"
+#include "image.h"
 #include "ipc/channel.h"
+#include "math.h"
 #include "memory.h"
+#include "mouse.h"
 #include "rect.h"
 #include "syscall.h"
 #include "time.h"
 #include "window.h"
 #include "window/ui/retained_ui_internal.h"
+#include <stdio.h>
 
 #define MAX_CLIENTS 16
 
@@ -19,6 +24,7 @@ typedef struct client {
   bool exists;
   channel_handle ch;
   window *win;
+  int pid;
 } client;
 
 static window s_window_pool[WINDOW_MAX_COUNT] = {0};
@@ -27,9 +33,9 @@ static client s_client_pool[MAX_CLIENTS] = {0};
 ipc_srv_handle g_srv_handle = {0};
 channel_handle g_channel_handles[WINDOW_MAX_COUNT] = {0};
 
-fb_info g_screen = {0};     // Entire screen
-fb_info g_backbuffer = {0}; // Entire screen backbuffer
-fb_info g_desktop = {0};    //
+fb_info g_screen = {0};
+fb_info g_backbuffer = {0};
+fb_info g_desktop = {0};
 
 static mouse_event g_mouse = {0};
 
@@ -42,23 +48,41 @@ static window *s_windows = 0;
 static window *s_last_window = 0;
 static window *s_dragged_window = 0;
 
-static bool status_bar_dirty;
+static bool status_bar_dirty = true;
+static bool s_bg_dirty = true;
+static bool s_app_bar_dirty = true;
+
+static int g_cursor_x = 0;
+static int g_cursor_y = 0;
+static int g_prev_cursor_x = 0;
+static int g_prev_cursor_y = 0;
+
+static bool s_full_redraw = false;
+
+static char debug_buf[256];
+
+#define DEBUG(fmt, ...)                                                        \
+  do {                                                                         \
+    sprintf(debug_buf, "[DAFNE]: " fmt "\n", ##__VA_ARGS__);                   \
+    sys_write(debug_buf);                                                      \
+  } while (0)
 
 static client *alloc_client() {
   for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
-    if (!s_client_pool[i].exists)
+    if (!s_client_pool[i].exists) {
+      s_client_pool[i].exists = true;
       return &s_client_pool[i];
+    }
   }
   return 0;
 }
 
-static window_handle alloc_window_handle() {
-  for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
-    if (!s_window_pool[i].exists)
-      return i;
-  }
-  return -1;
+static void free_client(client *c) {
+  c->exists = false;
+  c->win = 0;
+  c->ch = 0;
 }
+
 static window *get_window(window_handle h) {
   if (h < 0 || h >= WINDOW_MAX_COUNT)
     return 0;
@@ -66,10 +90,19 @@ static window *get_window(window_handle h) {
   return &s_window_pool[h];
 }
 
-static int g_cursor_x = 0;
-static int g_cursor_y = 0;
-static int g_prev_cursor_x = 0;
-static int g_prev_cursor_y = 0;
+static inline window *alloc_window() {
+  for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
+    window *win = &s_window_pool[i];
+    if (!win->exists) {
+      win->exists = true;
+      win->handle = i;
+      return win;
+    }
+  }
+  return 0;
+}
+
+static inline void free_window(window *win) { win->exists = false; }
 
 void compositor_set_cursor(int x, int y) {
   g_prev_cursor_x = g_cursor_x;
@@ -121,7 +154,12 @@ static void render_title_bar(fb_info *dst, window *w) {
 
   gfx_rect_rounded(dst, w->x, w->y, tw, WINDOW_TITLE_BAR_HEIGHT, bar,
                    WINDOW_BORDER_RADIUS, WINDOW_BORDER_RADIUS, 0, 0);
-  gfx_str(dst, w->x + 6, w->y + btn_marg_y, w->title, 0xffFFFFFF);
+
+  if (w->icon)
+    gfx_imgs(dst, w->x + btn_marg_y, w->y + btn_marg_y, FONT_GLYPH_HEIGHT,
+             FONT_GLYPH_HEIGHT, w->icon);
+  gfx_str(dst, w->x + FONT_GLYPH_HEIGHT + btn_marg_y + btn_marg_y,
+          w->y + btn_marg_y, w->title, 0xffFFFFFF);
 
   gfx_rect_rounded(dst, w->x + tw - WINDOW_BUTTON_WIDTH, w->y,
                    WINDOW_BUTTON_WIDTH, WINDOW_TITLE_BAR_HEIGHT, cls_bg, 0,
@@ -171,20 +209,17 @@ static window *get_window_at_pos(int x, int y) {
   }
   return 0;
 }
-
 static bool hit_minimize(window *w, int x, int y) {
   int bx = w->x + (int)w->front_buf.width - WINDOW_BUTTON_WIDTH -
            WINDOW_BUTTON_WIDTH;
   return PT_IN_RECT(x, y, bx, w->y, WINDOW_BUTTON_WIDTH,
                     WINDOW_TITLE_BAR_HEIGHT);
 }
-
 static bool hit_close(window *w, int x, int y) {
   int bx = w->x + (int)w->front_buf.width - WINDOW_BUTTON_WIDTH;
   return PT_IN_RECT(x, y, bx, w->y, WINDOW_BUTTON_WIDTH,
                     WINDOW_TITLE_BAR_HEIGHT);
 }
-
 static bool hit_title_bar(window *w, int x, int y) {
   return x >= w->x && x < w->x + (int)w->front_buf.width && y >= w->y &&
          y < w->y + WINDOW_TITLE_BAR_HEIGHT;
@@ -203,48 +238,128 @@ static void add_window(window *win) {
 
   win->prev = 0;
   s_windows = win;
+  s_app_bar_dirty = true;
 }
 static void remove_window(window *win) {
-  if (win->prev)
-    win->prev->next = win->next;
-  if (win->next)
-    win->next->prev = win->prev;
 
   if (win == s_last_window)
     s_last_window = win->prev;
 
   if (win == s_windows)
-    s_last_window = win->next;
+    s_windows = win->next;
+
+  if (win->prev) {
+    win->prev->next = win->next;
+    win->prev = 0;
+  }
+  if (win->next) {
+    win->next->prev = win->prev;
+    win->next = 0;
+  }
+
+  s_app_bar_dirty = true;
+  s_full_redraw = true;
+}
+static void destroy_window(window *w) {
+  free(w->double_buffer ? MIN(w->front_buf.ptr, w->back_buf.ptr)
+                        : w->front_buf.ptr);
+  free_window(w);
 }
 
-void compositor_update_desktop() {
-  ulong ts = sys_unix_time();
-  if (status_bar_dirty || ts != g_time) {
-    gfx_rect(&g_desktop, 0, 0, g_desktop.width, STATUS_BAR_HEIGHT,
-             RGB(109, 94, 214));
+static inline void update_app_bar() {
+  static int last_hovered = -1;
+  static bool last_clicked = false;
 
-    int x = 0;
-    char name[4] = "\0\0\0\0";
+  bool is_click = (g_mouse.buttons & MOUSE_BTN_LEFT) && !last_clicked;
+  {
+    int app_y = STATUS_BAR_HEIGHT + APP_BAR_ICON_GAP;
     for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
       window *win = &s_window_pool[i];
       if (!win->exists)
         continue;
-      memcpy(name, win->title, 3);
-      gfx_rect(&g_desktop, x, 5, FONT_GLYPH_WIDTH * 3, FONT_GLYPH_HEIGHT,
-               RGB(255, 0, 0));
-      gfx_str(&g_desktop, x, 5, name, RGB(0, 255, 0));
 
-      x += FONT_GLYPH_WIDTH * 4;
+      if (PT_IN_RECT(g_cursor_x, g_cursor_y, APP_BAR_ICON_MARGIN, app_y,
+                     APP_BAR_ICON_SIZE, APP_BAR_ICON_SIZE)) {
+        if (is_click) {
+          window_focus(win);
+          s_app_bar_dirty = true;
+        }
+        if (last_hovered != i) {
+          last_hovered = i;
+          s_app_bar_dirty = true;
+          break;
+        }
+      } else if (last_hovered == i) {
+        s_app_bar_dirty = true;
+        last_hovered = -1;
+      }
+      app_y += APP_BAR_ICON_SIZE + APP_BAR_ICON_GAP;
     }
+  }
+
+  if (s_app_bar_dirty) {
+    gfx_rect_gradient(&g_desktop, 0, STATUS_BAR_HEIGHT, APP_BAR_WIDTH,
+                      g_desktop.height, RGB(19, 75, 89), RGB(19, 116, 158), 0);
+
+    int app_y = STATUS_BAR_HEIGHT + APP_BAR_ICON_GAP;
+
+    for (int i = 0; i < WINDOW_MAX_COUNT; i++) {
+      window *win = &s_window_pool[i];
+      if (!win->exists)
+        continue;
+      gfx_rect_rounded(&g_desktop, APP_BAR_ICON_MARGIN, app_y,
+                       APP_BAR_ICON_SIZE, APP_BAR_ICON_SIZE,
+                       win == s_windows    ? last_hovered == i
+                                                 ? ARGB(150, 50, 50, 120)
+                                                 : ARGB(150, 10, 10, 60)
+                          : last_hovered == i ? ARGB(150, 50, 50, 50)
+                                           : ARGB(150, 10, 10, 10),
+                       APP_BAR_ICON_RADIUS, APP_BAR_ICON_RADIUS,
+                       APP_BAR_ICON_RADIUS, APP_BAR_ICON_RADIUS);
+      if (win->icon)
+        gfx_imgs(&g_desktop, APP_BAR_ICON_MARGIN, app_y, APP_BAR_ICON_SIZE,
+                 APP_BAR_ICON_SIZE, win->icon);
+      app_y += APP_BAR_ICON_SIZE + APP_BAR_ICON_GAP;
+    }
+
+    s_app_bar_dirty = false;
+  }
+}
+static inline void update_status_bar() {
+  ulong ts = sys_unix_time();
+
+  if (ts != g_time) {
+    status_bar_dirty = true;
+  }
+
+  if (status_bar_dirty) {
+    gfx_rect_gradient(&g_desktop, 0, 0, g_desktop.width, STATUS_BAR_HEIGHT,
+                      RGB(19, 35, 49), RGB(5, 56, 88), 0);
+
+    gfx_rect_rounded(&g_desktop, 5, 2, 30, STATUS_BAR_HEIGHT - 4,
+                     RGB(50, 50, 50), 3, 3, 3, 3);
+    gfx_rect_rounded(&g_desktop, 5, 2, 15, STATUS_BAR_HEIGHT - 4,
+                     RGB(128, 255, 105), 3, 0, 0, 3);
 
     g_time = ts;
     datetime dt = to_datetime(ts);
+    gfx_strf(&g_desktop, g_desktop.width - FONT_GLYPH_WIDTH * 22,
+             (STATUS_BAR_HEIGHT - STATUS_BAR_TEXT_HEIGHT) / 2,
+             RGB(239, 240, 228), "%04u-%02u-%02u   %02u:%02u:%02u\n", dt.year,
+             dt.month, dt.day, dt.hour, dt.min, dt.sec);
 
-    gfx_strf(&g_desktop, g_desktop.width - FONT_GLYPH_WIDTH * 10, 5,
-             RGB(255, 94, 214), "%02u:%02u:%02u\n", dt.hour, dt.min, dt.sec);
-    gfx_strf(&g_desktop, g_desktop.width - FONT_GLYPH_WIDTH * 12, 30,
-             RGB(255, 94, 214), "%04u-%02u-%02u", dt.year, dt.month, dt.day);
+    status_bar_dirty = false;
   }
+}
+
+void compositor_update_desktop() {
+  if (s_bg_dirty) {
+    gfx_rect_gradient(&g_desktop, 0, 0, g_desktop.width, g_desktop.height,
+                      RGB(42, 123, 155), RGB(87, 199, 133), 0);
+    s_bg_dirty = false;
+  }
+  update_status_bar();
+  update_app_bar();
 }
 
 void compositor_init() {
@@ -350,9 +465,10 @@ __attribute__((optimize("O1"))) void compositor_run() {
       break;
     }
   }
-  if (any_moved) {
+  if (any_moved || s_full_redraw) {
     full_composite();
     send_paint_events();
+    s_full_redraw = false;
     return;
   }
 
@@ -380,19 +496,21 @@ __attribute__((optimize("O1"))) void compositor_run() {
   send_paint_events();
 }
 
-void handle_incoming() {
+static inline void handle_incoming() {
   channel_handle ch;
   while ((ch = ipc_accept_nb(g_srv_handle)) != INVALID_HANDLE) {
-    sys_write("[DAFNE] Incoming connection...\n");
-
     client *client = alloc_client();
     client->exists = true;
     client->ch = ch;
     client->win = 0;
+    client->pid = ipc_get_pid(ch);
+
+    DEBUG("Incoming connection... (PID %d)", client->pid);
+    sys_write("[DAFNE] Incoming connection...\n");
   }
 }
 
-void handle_events() {
+static inline void handle_events() {
   // MAYBE LINKED LIST INSTEAD
 
   comp_event ev;
@@ -401,7 +519,8 @@ void handle_events() {
     client *client = &s_client_pool[i];
     if (!client->exists)
       continue;
-    while (channel_recv_nb(client->ch, &ev, sizeof(comp_event)) ==
+    int read;
+    while ((read = channel_recv_nb(client->ch, &ev, sizeof(comp_event))) ==
            sizeof(comp_event)) {
       switch (ev.type) {
       case COMP_WINDOW_PRESENT: {
@@ -419,10 +538,7 @@ void handle_events() {
       }
       case COMP_WINDOW_CREATE: {
         sys_write("[DAFENE] create window\n");
-        window_handle h = alloc_window_handle();
-        if (h == INVALID_HANDLE)
-          continue;
-        window *w = get_window(h);
+        window *w = alloc_window();
         if (!w)
           continue;
 
@@ -469,17 +585,45 @@ void handle_events() {
         w->title[i] = '\0';
         w->presented = true;
 
+        if (ev.create_window.icon_path[0]) {
+          w->icon = img_load(ev.create_window.icon_path);
+        } else {
+          char icon_path[128];
+          syscall(SYS_PROCESS_PATH, client->pid, (ulong)(&icon_path), 128);
+          DEBUG("Loading icon from ELF: %s", icon_path);
+          w->icon = elf_icon_load(icon_path);
+        }
+
         add_window(w);
 
         window_event ev = {.type = WET_CREATE};
         ev.create_event.width = w->front_buf.width;
         ev.create_event.height = w->front_buf.height;
         ev.create_event.pitch = w->front_buf.pitch;
-        ev.create_event.handle = h;
+        ev.create_event.handle = w->handle;
         client_post_event(client, &ev);
         break;
       }
+      case COMP_WINDOW_DESTROY: {
+        window_handle h = ev.destroy_window.handle;
+        window *w = get_window(h);
+        if (!w || w->client != client)
+          continue;
+        remove_window(w);
+        destroy_window(w);
+        break;
+      };
       }
+    }
+
+    if (read == -1) {
+      sys_write("[DAFNE] Lost connection to process\n");
+      if (client->win) {
+        remove_window(client->win);
+        destroy_window(client->win);
+      }
+      channel_close(client->ch);
+      free_client(client);
     }
   }
 }
@@ -511,6 +655,7 @@ void window_focus(window *w) {
 
   // w->focused = true;
   w->moved = true;
+  w->hidden = false;
 }
 
 void window_move_to(window *w, int x, int y) {

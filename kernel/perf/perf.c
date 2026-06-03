@@ -10,6 +10,9 @@ perf_counter g_perf_user_time _PERF_CTR = {"[user time]", 0, 0, ~(ulong)0, 0};
 perf_counter g_perf_kernel_time _PERF_CTR = {"[kernel time]", 0, 0, ~(ulong)0, 0};
 perf_counter g_perf_irq_time _PERF_CTR = {"[irq time]", 0, 0, ~(ulong)0, 0};
 
+ulong g_idle_time = 0;
+ulong g_idle_start = 0;
+
 #define PERF_MAX_COUNTERS 128
 #define PERF_SAMPLE_MAX   512
 #define PERF_TOP_N        16
@@ -17,13 +20,14 @@ perf_counter g_perf_irq_time _PERF_CTR = {"[irq time]", 0, 0, ~(ulong)0, 0};
 static ulong g_perf_epoch = 0;
 
 static ulong g_samples[PERF_SAMPLE_MAX];
-static uint  g_sample_n    = 0;
-static uint  g_sample_head = 0;
+static uint g_sample_n = 0;
+static uint g_sample_head = 0;
 
 void perf_add_sample(ulong rip) {
   g_samples[g_sample_head] = rip;
   g_sample_head = (g_sample_head + 1) % PERF_SAMPLE_MAX;
-  if (g_sample_n < PERF_SAMPLE_MAX) g_sample_n++;
+  if (g_sample_n < PERF_SAMPLE_MAX)
+    g_sample_n++;
 }
 
 static inline ulong perf_rdtsc(void) {
@@ -40,8 +44,10 @@ void perf_reset(void) {
     c->min_cycles = ~(ulong)0;
     c->max_cycles = 0;
   }
-  g_sample_n    = 0;
+  g_sample_n = 0;
   g_sample_head = 0;
+  g_idle_start = g_idle_start ? perf_rdtsc() : 0;
+  g_idle_time = 0;
 }
 
 void perf_report(void) {
@@ -72,6 +78,7 @@ void perf_report(void) {
   ulong elapsed = g_perf_epoch ? perf_rdtsc() - g_perf_epoch : 0;
 
   serial_printf("\n--- perf report (%u counters, %u elapsed cycles) ---\n", m, elapsed);
+  serial_printf("\n--- idle time   (%u cycles  -              %u%%) ---\n", g_idle_time, elapsed ? (g_idle_time * 100) / elapsed : 0);
   serial_printf("|name                           tot_cyc        calls    avg_cyc    min_cyc    max_cyc      %%|\n");
   serial_printf("|------------------------------ -------------- -------- ---------- ---------- ---------- ----|\n");
   for (ulong i = 0; i < m; i++) {
@@ -85,25 +92,39 @@ void perf_report(void) {
   serial_printf("|------------------------------ -------------- -------- ---------- ---------- ---------- ----|\n");
 
   // Statistical sample profile
-  if (g_sample_n == 0) return;
+  if (g_sample_n == 0)
+    return;
 
-  typedef struct { ulong rip; uint count; } rip_count_t;
+  typedef struct {
+    ulong rip;
+    uint count;
+  } rip_count_t;
   static rip_count_t uniq[PERF_SAMPLE_MAX];
   uint nu = 0;
   for (uint i = 0; i < g_sample_n; i++) {
     ulong r = g_samples[i];
     uint j;
     for (j = 0; j < nu; j++)
-      if (uniq[j].rip == r) { uniq[j].count++; break; }
-    if (j == nu) { uniq[nu].rip = r; uniq[nu].count = 1; nu++; }
+      if (uniq[j].rip == r) {
+        uniq[j].count++;
+        break;
+      }
+    if (j == nu) {
+      uniq[nu].rip = r;
+      uniq[nu].count = 1;
+      nu++;
+    }
   }
   // selection sort: highest count first, top PERF_TOP_N
   uint show = nu < PERF_TOP_N ? nu : PERF_TOP_N;
   for (uint i = 0; i < show; i++) {
     uint best = i;
     for (uint j = i + 1; j < nu; j++)
-      if (uniq[j].count > uniq[best].count) best = j;
-    rip_count_t tmp = uniq[i]; uniq[i] = uniq[best]; uniq[best] = tmp;
+      if (uniq[j].count > uniq[best].count)
+        best = j;
+    rip_count_t tmp = uniq[i];
+    uniq[i] = uniq[best];
+    uniq[best] = tmp;
   }
 
   serial_printf("\n--- sample profile (%u samples) ---\n", g_sample_n);

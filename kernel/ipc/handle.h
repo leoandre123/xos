@@ -24,3 +24,5 @@ typedef base_handle channel_handle;
 
 base_handle handle_alloc(struct process *p, handle_type type, void *ptr);
 handle_entry *handle_get(struct process *p, base_handle h);
+
+void handle_close_all(struct process *p);

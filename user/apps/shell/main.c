@@ -3,15 +3,15 @@
 #include "time.h"
 #include <stdio.h>
 
-#define bool _Bool
-#define true 1
+#define bool  _Bool
+#define true  1
 #define false 0
 
-#define MAX_CMD 256
-#define MAX_ARGS 8
+#define MAX_CMD        256
+#define MAX_ARGS       8
 #define MAX_ARG_LENGTH 64
 
-#define MAX_PARTS 64
+#define MAX_PARTS       64
 #define MAX_PART_LENGTH 64
 
 static char current_dir[256] = "/";
@@ -116,7 +116,6 @@ static void cmd_cd(char args[MAX_ARGS][MAX_ARG_LENGTH], int arg_count) {
   char new_dir[256] = "/";
   char *dir_ptr = &new_dir[1];
 
-  sys_write_hex(part_count);
   for (int i = 0; i < part_count; i++) {
     dir_ptr += strcopy(dir_ptr, parts[i], -1, false);
     if (i != part_count - 1)
